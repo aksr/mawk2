@@ -1,0 +1,161 @@
+# Microsoft C 6.0A makefile for mawk,
+# an implementation of The AWK Programming Language, 1988.
+# 
+# This makefile requires Microsoft C's NMAKE program
+
+####################################
+# user settable macros
+#
+
+CC = cl.exe
+CFLAGS = -O -Gs
+
+####################################
+# rules for large-memory object files
+#
+.c.obl:
+	$(CC) $(CFLAGS) -AL -c -Fo$@ $<
+
+#######################################
+
+OBL = parse.obl \
+array.obl \
+bi_funct.obl \
+bi_vars.obl \
+cast.obl \
+code.obl \
+da.obl \
+error.obl \
+execute.obl \
+fcall.obl \
+field.obl \
+files.obl \
+fin.obl \
+hash.obl \
+init.obl \
+jmp.obl \
+kw.obl \
+main.obl \
+matherr.obl \
+memory.obl \
+print.obl \
+re_cmpl.obl \
+scan.obl \
+scancode.obl \
+split.obl \
+zmalloc.obl  \
+version.obl  \
+dosexec.obl
+
+REXP_OBL = rexp.obl \
+rexp0.obl \
+rexp1.obl \
+rexp2.obl \
+rexp3.obl \
+rexpdb.obl
+
+
+mawk.exe : $(OBL)  $(REXP_OBL)
+        link.exe @msdos\mawkmsc.lnk
+
+
+RFLAGS=-I. -Irexp -DMAWK
+
+rexp.obl  :  rexp\rexp.c  rexp\rexp.h
+        $(CC) $(CFLAGS) $(RFLAGS) -AL -c -Fo$@ rexp\rexp.c
+
+rexp0.obl  :  rexp\rexp0.c  rexp\rexp.h
+        $(CC) $(CFLAGS) $(RFLAGS) -AL -c -Fo$@ rexp\rexp0.c
+
+rexp1.obl  :  rexp\rexp1.c  rexp\rexp.h
+        $(CC) $(CFLAGS) $(RFLAGS) -AL -c -Fo$@ rexp\rexp1.c
+
+rexp2.obl  :  rexp\rexp2.c  rexp\rexp.h
+        $(CC) $(CFLAGS) $(RFLAGS) -AL -c -Fo$@ rexp\rexp2.c
+
+rexp3.obl  :  rexp\rexp3.c  rexp\rexp.h
+        $(CC) $(CFLAGS) $(RFLAGS) -AL -c -Fo$@ rexp\rexp3.c
+
+rexpdb.obl  :  rexp\rexpdb.c  rexp\rexp.h
+        $(CC) $(CFLAGS) $(RFLAGS) -AL -c -Fo$@ rexp\rexpdb.c
+
+config.h : msdos\msc.h
+	copy msdos\msc.h  config.h
+
+dosexec.c : msdos\dosexec.c
+	copy msdos\dosexec.c dosexec.c
+
+test : mawk.exe  # test that we have a sane mawk
+	copy mawk.exe test\mawk.exe
+	cd test
+	@echo you may have to run the test manually
+        @mawktest.bat
+	del mawk.exe
+	cd ..
+
+fpe_test :  mawk.exe # test FPEs are handled OK
+	copy mawk.exe test\mawk.exe
+	@echo testing floating point exception handling
+	cd test
+	@echo you may have to run the test manually
+        @fpe_test.bat
+	del mawk.exe
+	cd ..
+
+###################################################
+# parse.c is provided 
+# so you don't need to make it.
+#
+# But if you do:  here's how:
+# To make it with bison under msdos
+# YACC=bison -y
+# parse.c : parse.y 
+#	$(YACC) -d parse.y
+#	rename y_tab.h parse.h
+#	rename y_tab.c parse.c
+########################################
+
+#scancode.c :  makescan.c  scan.h
+#	$(CC) -o makescan.exe  makescan.c
+#	makescan.exe > scancode.c
+#	del makescan.exe
+
+clean :
+	del *.obl
+
+distclean :
+	del *.obl
+	del config.h dosexec.c
+	del mawk.exe
+
+
+#  dependencies of .objs on .h
+array.obl : config.h field.h bi_vars.h mawk.h symtype.h nstd.h memory.h zmalloc.h types.h sizes.h
+bi_funct.obl : config.h field.h bi_vars.h mawk.h init.h regexp.h symtype.h nstd.h repl.h memory.h bi_funct.h files.h zmalloc.h fin.h types.h sizes.h
+bi_vars.obl : config.h field.h bi_vars.h mawk.h init.h symtype.h nstd.h memory.h zmalloc.h types.h sizes.h
+cast.obl : config.h field.h mawk.h parse.h symtype.h nstd.h memory.h repl.h scan.h zmalloc.h types.h sizes.h
+code.obl : config.h field.h code.h mawk.h init.h symtype.h nstd.h memory.h jmp.h zmalloc.h types.h sizes.h
+da.obl : config.h field.h code.h mawk.h symtype.h nstd.h memory.h repl.h bi_funct.h zmalloc.h types.h sizes.h
+error.obl : config.h bi_vars.h mawk.h parse.h vargs.h symtype.h nstd.h scan.h types.h sizes.h
+execute.obl : config.h field.h bi_vars.h code.h mawk.h regexp.h symtype.h nstd.h memory.h repl.h bi_funct.h zmalloc.h types.h fin.h sizes.h
+fcall.obl : config.h code.h mawk.h symtype.h nstd.h memory.h zmalloc.h types.h sizes.h
+field.obl : config.h field.h bi_vars.h mawk.h init.h parse.h regexp.h symtype.h nstd.h memory.h repl.h scan.h zmalloc.h types.h sizes.h
+files.obl : config.h mawk.h nstd.h memory.h files.h zmalloc.h types.h fin.h sizes.h
+fin.obl : config.h field.h bi_vars.h mawk.h parse.h symtype.h nstd.h memory.h scan.h zmalloc.h types.h fin.h sizes.h
+hash.obl : config.h mawk.h symtype.h nstd.h memory.h zmalloc.h types.h sizes.h
+init.obl : config.h field.h bi_vars.h code.h mawk.h init.h symtype.h nstd.h memory.h zmalloc.h types.h sizes.h
+jmp.obl : config.h code.h mawk.h init.h symtype.h nstd.h memory.h jmp.h zmalloc.h types.h sizes.h
+kw.obl : config.h mawk.h init.h parse.h symtype.h nstd.h types.h sizes.h
+main.obl : config.h field.h bi_vars.h code.h mawk.h init.h symtype.h nstd.h memory.h files.h zmalloc.h types.h fin.h sizes.h
+makescan.obl : parse.h symtype.h scan.h
+matherr.obl : config.h mawk.h nstd.h types.h sizes.h
+memory.obl : config.h mawk.h nstd.h memory.h zmalloc.h types.h sizes.h
+parse.obl : config.h field.h bi_vars.h code.h mawk.h symtype.h nstd.h memory.h bi_funct.h files.h zmalloc.h jmp.h types.h sizes.h
+print.obl : config.h field.h bi_vars.h mawk.h parse.h symtype.h nstd.h memory.h scan.h bi_funct.h files.h zmalloc.h types.h sizes.h
+re_cmpl.obl : config.h mawk.h parse.h regexp.h symtype.h nstd.h memory.h repl.h scan.h zmalloc.h types.h sizes.h
+scan.obl : config.h field.h code.h mawk.h init.h parse.h symtype.h nstd.h memory.h repl.h scan.h files.h zmalloc.h types.h fin.h sizes.h
+split.obl : config.h field.h bi_vars.h mawk.h parse.h regexp.h symtype.h nstd.h memory.h scan.h bi_funct.h zmalloc.h types.h sizes.h
+version.obl : config.h mawk.h patchlev.h nstd.h types.h sizes.h
+zmalloc.obl : config.h mawk.h nstd.h zmalloc.h types.h sizes.h
+
+

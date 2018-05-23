@@ -1,0 +1,88 @@
+#!/usr/bin/make -f
+#
+# To make the binary distribution package, the ``Debianized'' source package
+# and the context diff to the original package, type `./debian.rules dist'.
+# Make sure that `debian.rules' is executable before the final distribution
+# is made.
+#
+# Invoke each target with `./debian.rules <target>'.  All targets should be
+# invoked with the package root as the current directory.
+#
+# The `binary' target must be run as root, as it needs to install files with
+# specific ownerships.  The `diff' target assumes that you have the original
+# source package available, unpacked, in ../$(p)-$(v).orig, or that you have
+# the previous revision of the ``Debianized'' source package and context diff
+# in the parent directory.
+
+CC = gcc
+CFLAGS = -O2
+LDFLAGS = -s
+
+make_directory= install -d -o root -g root -m 755
+install_binary= install -s -o root -g root -m 755
+install_files=  install    -o root -g root -m 644
+
+# The name of the package (for example, `emacs').
+package=mawk
+# The version of the package (for example, `19.28').
+version=1.2.2
+# The Debian revision of the package (for example, `2').
+debian=1
+
+# The next section may have to be extensively modified
+
+build:
+	@echo "Building the binaries ..."
+	./configure
+	$(MAKE) CC="$(CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+	touch build
+
+clean:
+	@echo "Cleaning up after 'make build' ..."
+	-rm -f build
+	-$(MAKE) -i clean
+	-rm -f config.cache config.h  config.log config.status Makefile
+	-rm -rf debian-tmp debian*~ # man/index.db
+
+binary:		checkroot build
+	@echo "Making the binary package: $(package)-$(version)-$(debian).deb ..."
+	rm -rf debian-tmp
+	$(make_directory) debian-tmp/DEBIAN
+	$(make_directory) debian-tmp/usr/bin
+	$(make_directory) debian-tmp/usr/man/man1
+	$(make_directory) debian-tmp/usr/doc/examples/mawk
+	$(make_directory) debian-tmp/usr/doc/copyright
+	sed -e '2s/=/$(version)/; 3s/=/$(debian)/' \
+		debian.control > debian-tmp/DEBIAN/control
+	$(install_binary) debian.postinst debian-tmp/DEBIAN/postinst
+	$(install_binary) debian.prerm debian-tmp/DEBIAN/prerm
+	$(install_binary) mawk debian-tmp/usr/bin
+	$(install_files) man/mawk.1  debian-tmp/usr/man/man1/mawk.1
+	$(install_files) debian.README debian-tmp/usr/doc/copyright/$(package)
+	$(install_files) examples/* debian-tmp/usr/doc/examples/mawk
+	chown -R root.root debian-tmp
+	gzip -9 debian-tmp/usr/doc/examples/mawk/*
+	dpkg --build debian-tmp
+	mv debian-tmp.deb ../$(package)-$(version)-$(debian).deb
+
+# Below here is fairly generic really.
+
+source:		clean
+	@echo "Making the souce package: $(package)-$(version)-$(debian).tar.gz ..."
+	chmod +x debian.rules
+	(cd .. && tar cf - $(package)-$(version) | \
+		gzip -9f > $(package)-$(version)-$(debian).tar.gz)
+ 
+diff:		clean
+	@echo "Making the context diff: $(package)-$(version)-$(debian).diff.gz ..."
+	cd .. && (diff -ruN $(package)-$(version).orig $(package)-$(version) \
+		>$(package)-$(version)-$(debian).diff; [ $$? = 1 ]) && \
+		gzip -9f $(package)-$(version)-$(debian).diff
+
+checkroot:
+	test root = "`whoami`"
+
+# Prepares the package for distribution.
+dist: binary source diff
+
+.PHONY: build binary source diff clean checkroot dist
