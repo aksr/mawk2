@@ -9,8 +9,7 @@
 
 
 function usage()
-{ ustr = sprintf("usage: %s  [start] stop", ARGV[0])
-  system( "echo " ustr) 
+{ printf("usage: %s  [start] stop\n", ARGV[0]) > "/dev/stderr"
   exit 1
 }
 

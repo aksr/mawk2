@@ -1,26 +1,18 @@
 
 /********************************************
 init.h
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/* $Log: init.h,v $
- * Revision 1.2  1995/06/18  19:42:18  mike
- * Remove some redundant declarations and add some prototypes
- *
- * Revision 1.1.1.1  1993/07/03  18:58:14  mike
- * move source to cvs
- *
- * Revision 5.1  1991/12/05  07:59:22  brennan
- * 1.1 pre-release
- *
-*/
 
 /* init.h  */
 
@@ -40,21 +32,18 @@ char *fname ;
 
 extern PFILE *pfile_list ;
 
-extern char *sprintf_buff, *sprintf_limit ;
-
-
-void  PROTO( initialize, (int, char **) ) ;
-void  PROTO( code_init, (void) ) ;
-void  PROTO( code_cleanup, (void) ) ;
-void  PROTO( compile_cleanup, (void) ) ;
-void PROTO(scan_init, ( char *) ) ;
-void PROTO(bi_vars_init, (void) ) ;
-void PROTO(bi_funct_init, (void) ) ;
-void PROTO(print_init, (void) ) ;
-void PROTO(kw_init, (void) ) ;
-void  PROTO( field_init, (void) ) ;
-void  PROTO( fpe_init, (void) ) ;
-void  PROTO( load_environ, (ARRAY)) ;
-void  PROTO( set_stderr, (void)) ;
+void   initialize(int, char **) ;
+void   code_init(void) ;
+void   code_cleanup(void) ;
+void   compile_cleanup(void) ;
+void  scan_init(const char *) ;
+void  bi_vars_init(void) ;
+void  bi_funct_init(void) ;
+void  print_init(void) ;
+void  kw_init(void) ;
+void   field_init(void) ;
+void   fpe_init(void) ;
+void   load_environ(ARRAY) ;
+void   set_stdoutput(void) ;
 
 #endif   /* INIT_H  */

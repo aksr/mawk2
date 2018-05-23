@@ -1,45 +1,30 @@
 
 /********************************************
 zmalloc.h
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: zmalloc.h,v $
- * Revision 1.2  1993/07/04  12:52:22  mike
- * start on autoconfig changes
- *
- * Revision 1.1.1.1  1993/07/03  18:58:23  mike
- * move source to cvs
- *
- * Revision 5.1  1991/12/05  07:59:41  brennan
- * 1.1 pre-release
- *
-*/
-
-/* zmalloc.h */
 
 #ifndef  ZMALLOC_H
 #define  ZMALLOC_H
 
-#include "nstd.h"
+#include <stddef.h>
 
-PTR  PROTO( bmalloc, (unsigned) ) ;
-void PROTO( bfree, (PTR, unsigned) ) ;
-PTR  PROTO( zrealloc , (PTR,unsigned,unsigned) ) ;
+void* emalloc(size_t) ;
+void* erealloc(void*,size_t) ;
 
-
-#define ZBLOCKSZ    8    
-#define ZSHIFT      3
-
-
-#define zmalloc(size)  bmalloc((((unsigned)size)+ZBLOCKSZ-1)>>ZSHIFT)
-#define zfree(p,size)  bfree(p,(((unsigned)size)+ZBLOCKSZ-1)>>ZSHIFT)
+void* zmalloc(size_t) ;
+void* zrealloc(void*,size_t,size_t) ;
+void  zfree(void*,size_t) ;
 
 #define ZMALLOC(type)  ((type*)zmalloc(sizeof(type)))
 #define ZFREE(p)	zfree(p,sizeof(*(p)))

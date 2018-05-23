@@ -1,30 +1,18 @@
 
 /********************************************
 scan.h
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-
-/* $Log: scan.h,v $
- * Revision 1.3  1995/06/18  19:42:26  mike
- * Remove some redundant declarations and add some prototypes
- *
- * Revision 1.2  1994/09/23  00:20:06  mike
- * minor bug fix: handle \ in eat_nl()
- *
- * Revision 1.1.1.1  1993/07/03  18:58:20  mike
- * move source to cvs
- *
- * Revision 5.1  1991/12/05  07:59:33  brennan
- * 1.1 pre-release
- *
-*/
 
 
 /* scan.h  */
@@ -39,8 +27,7 @@ the GNU General Public License, version 2, 1991.
 #include  "parse.h"
 #endif
 
-
-extern  char scan_code[256] ;
+extern  int scan_code[256] ;
 
 /*  the scan codes to compactify the main switch */
 
@@ -81,10 +68,10 @@ extern  char scan_code[256] ;
 
 #ifndef  MAKESCAN
 
-void  PROTO(eat_nl, (void) ) ;
+void   eat_nl(void) ;
 
 /* in error.c */
-void  PROTO( unexpected_char, (void) ) ;
+void   unexpected_char(void) ;
 
 #define  ct_ret(x)  return current_token = (x)
 

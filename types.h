@@ -1,27 +1,18 @@
 
 /********************************************
 types.h
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-
-/* $Log: types.h,v $
- * Revision 1.3  1993/07/15  23:56:18  mike
- * general cleanup
- *
- * Revision 1.2  1993/07/04  12:52:15  mike
- * start on autoconfig changes
- *
- * Revision 5.1  1991/12/05  07:59:39  brennan
- * 1.1 pre-release
- *
-*/
 
 
 /*  types.h  */
@@ -33,23 +24,19 @@ the GNU General Public License, version 2, 1991.
 
 
 /*  CELL  types  */
-
-#define  C_NOINIT                0
-#define  C_DOUBLE                1
-#define  C_STRING                2
-#define  C_STRNUM                3
-#define  C_MBSTRN                4 
-        /*could be STRNUM, has not been checked */
-#define  C_RE                    5
-#define  C_SPACE                 6
-        /* split on space */
-#define  C_SNULL                 7
-        /* split on the empty string  */
-#define  C_REPL                  8
-        /* a replacement string   '\&' changed to &  */
-#define  C_REPLV                 9
-        /* a vector replacement -- broken on &  */
-#define  NUM_CELL_TYPES         10
+enum {
+    C_NOINIT ,
+    C_DOUBLE ,
+    C_STRING ,
+    C_STRNUM ,
+    C_MBSTRN , /*could be STRNUM, has not been checked */
+    C_RE ,
+    C_SPACE , /* split on space */
+    C_SNULL , /* split on the empty string  */
+    C_REPL , /* a replacement string   '\&' changed to &  */
+    C_REPLV , /* a vector replacement -- broken on &  */
+    NUM_CELL_TYPES 
+} ;
 
 /* these defines are used to check types for two
    CELLs which are adjacent in memory */
@@ -71,32 +58,36 @@ the GNU General Public License, version 2, 1991.
 #define  STRNUM_AND_MBSTRN  ((1<<C_STRNUM)+(1<<C_MBSTRN))
 
 typedef  struct {
-unsigned len ;
-unsigned short ref_cnt ;
-char str[2] ;
+size_t len ;
+unsigned ref_cnt ;
+char str[4] ;
 } STRING ;
 
-/* number of bytes more than the characters to store a
-   string */
-#define  STRING_OH   (sizeof(STRING)-1)
+/* number of bytes for a STRING of length len */
+#define  STRING_SIZE(len)  ((len)<=3?sizeof(STRING):sizeof(STRING)+(len)-3)
+
+/* compare two strings for == */
+#define STRING_eq(s1,s2) ((s1)->len==(s2)->len && \
+                          memcmp((s1)->str,(s2)->str,(s1)->len)==0)
+
+/* make copy of STRING */
+#define STRING_dup(s)  (((STRING*)(s))->ref_cnt++, (STRING*)(s))
+
+/* like strcmp() */
+int STRING_cmp(STRING*,STRING*) ;
 
 
 typedef  struct cell {
-short type ;
-short vcnt ; /* only used if type == C_REPLV   */
-PTR   ptr ;
-double  dval ;
+    int type ;
+    PTR   ptr ;
+    double  dval ;
 }  CELL ;
 
 
 /* all builtins are passed the evaluation stack pointer and
    return its new value, here is the type */
 
-#ifndef  NO_PROTOS
-typedef CELL *(*PF_CP)(CELL *) ;
-#else
-typedef CELL *(*PF_CP)() ;
-#endif
+typedef CELL *(*PF_CP)(CELL*) ;
 
 /* an element of code (instruction) */
 typedef  union {

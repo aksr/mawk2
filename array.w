@@ -1,646 +1,67 @@
 
-% $Log: array.w,v $
-% Revision 1.4  1996/09/18 00:37:25  mike
-% 1) Fix stupid bozo in A[expr], expr is numeric and not integer.
-% 2) Add static for non-ansi compilers.
-% 3) Minor tweaks to documentation.
-%
-% Revision 1.3  1996/07/28 21:55:32  mike
-% trivial change -- add extra {}
-%
-% Revision 1.2  1996/02/25  23:42:25  mike
-% Fix zfree bug in array_clear.
-% Clean up documentation.
-%
+\input mwebmac
+\input ctmac
 
-%\hi -- hang item
-\def\hi{\smallskip\hangindent\parindent\indent\ignorespaces}
-\def\expr{{\it expr}}
-\def\Null{{\it null}}
+\RCSID{$Id: array.w,v 1.6 2016/07/20 18:05:22 mike Exp $}
+
+\TOC{Mawk Arrays}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-<<"array.h">>=
-<<array.h notice>>
-#ifndef ARRAY_H
-#define ARRAY_H 1
-<<array typedefs and [[#defines]]>>
-<<interface prototypes>>
-#endif /* ARRAY_H */
+\section{Introduction}
+This is the source and documentation for the [[mawk]] implementation
+of AWK arrays.  Arrays in AWK are associations of strings to awk scalar
+values. 
 
-<<"array.c">>=
-<<array.c notice>>
-#include "mawk.h"
-#include "symtype.h"
-#include "memory.h"
-#include "field.h"
-#include "bi_vars.h"
-<<local constants, defs and prototypes>>
-<<interface functions>>
-<<local functions>>
-
-@ Array Structure
+@ 
+\section{Array Structure}
 The type [[ARRAY]] is a pointer to a [[struct array]].
 The [[size]] field is the number of elements in the table.
-The meaning of the other fields depends on the [[type]] field.
+The meaning of the [[ptr]] field depends on the [[type]] field.
 
 <<array typedefs and [[#defines]]>>=
 typedef struct array {
-   PTR ptr ;  /* What this points to depends on the type */
-   unsigned size ; /* number of elts in the table */
-   unsigned limit ; /* Meaning depends on type */
-   unsigned hmask ; /* bitwise and with hash value to get table index */
-   short type ;  /* values in AY_NULL .. AY_SPLIT */
+   void* ptr ;  /* What this points to depends on the type */
+   size_t size ; /* number of elts in the table */
+   int type ;  /* values in AY_NULL .. AY_SPLIT */
 } *ARRAY ;
+@ %def ARRAY
 
-@
-There are three types of arrays and these are distinguished by the
-[[type]] field in the structure.  The types are:
+By AWK language specification, there is only one kind of array,
+but internally [[mawk]] has four kinds of arrays.
+These are distinguished by the
+[[type]] field in the structure.  The types are,
 
-\hi [[AY_NULL]]\quad The array is empty and the [[size]] field is always
-zero.  The other fields have no meaning.
+\I[[AY_NULL]] The array is empty.  The [[size]] and [[ptr]] fields are
+zero.
 
-\hi [[AY_SPLIT]]\quad The array was created by the [[AWK]] built-in
+\I[[AY_SPLIT]] The array was created by the [[AWK]] built-in
 [[split]].  The return value from [[split]] is stored in the [[size]]
-field.  The [[ptr]] field points at a vector of [[CELLs]].  The number
-of [[CELLs]] is the [[limit]] field. It is always true that
-${\it size}\leq{\it limit}$.  The address of [[A[i]]] is [[(CELL*)A->ptr+i-1]]
-for $1\leq i\leq{\it size}$.  The [[hmask]] field has no meaning.
+field.  The [[ptr]] field points at a vector of [[CELL]]s.  The number
+of [[CELL]]s is the [[size]] field. 
+The address of [[A[i]]] is [[(CELL*)A->ptr+i-1]].
 
-\hi {\bf Hash Table}\quad The array is a hash table.  If the [[AY_STR]] bit
-in the [[type]] field is set, then the table is keyed on strings.
-If the [[AY_INT]] bit in the [[type]] field is set, then the table is
-keyed on integers.  Both bits can be set, and then the two keys are
-consistent, i.e., look up of [[A[-14]]] and [[A["-14"]]] will
-return identical [[CELL]] pointers although the look up methods will
-be different.  In this case, the [[size]] field is the number of hash nodes
-in the table.  When insertion of a new element would cause [[size]] to
-exceed [[limit]], the table grows by doubling the number of hash chains.
-The invariant, 
-$({\it hmask}+1){\it max\_ave\_list\_length}={\it limit}$, is always true.
-{\it Max\_ave\_list\_length} is a tunable constant.
+\I[[AY_STR]] The [[ptr]] field points at an associative map from
+[[STRING*]] to [[CELL*]].  If [[s]] is an awk string, then this
+associative map  holds the memory for [[A[s]]].
 
+\I[[AY_INT]] The [[ptr]] field points at an associative map from
+[[integer]] to [[CELL*]].  If [[d]] is an awk numeric expression
+and of integer value, then this associative map holds the
+memory [[A[d]]].  An array of this type must always be
+accessed with an integer key.  If it is accessed with a string
+key, then the array is converted to type [[AY_STR]].
 
 <<array typedefs and [[#defines]]>>=
-#define AY_NULL		0
-#define AY_INT		1
-#define AY_STR		2
-#define AY_SPLIT	4
+enum {
+   AY_NULL = 0,
+   AY_SPLIT,
+   AY_STR,
+   AY_INT
+} ;
+@ %def AY_NULL AY_INT AY_STR AY_SPLIT
 
-@ Hash Tables
-The hash tables are linked lists of nodes, called [[ANODEs]].
-The number of lists is [[hmask+1]] which is always a power of two.
-The [[ptr]] field points at a vector of list heads.  Since there are
-potentially two types of lists, integer lists and strings lists,
-each list head is a structure, [[DUAL_LINK]].
-
-<<local constants, defs and prototypes>>=
-struct anode ;
-typedef struct {struct anode *slink, *ilink ;} DUAL_LINK ;
-
-@
-The string lists are chains connected by [[slinks]] and the integer
-lists are chains connected by [[ilinks]].  We sometimes refer to these
-lists as slists and ilists, respectively.
-The elements on the lists are [[ANODEs]].
-The fields of an [[ANODE]] are:
-
-\hi [[slink]]\quad The link field for slists.
-\hi [[ilink]]\quad The link field for ilists.
-\hi [[sval]]\quad If non-null, then [[sval]] is a pointer to a string
-key.  For a given table, if the [[AY_STR]] bit is set then every
-[[ANODE]] has a non-null [[sval]] field and conversely, if [[AY_STR]]
-is not set, then every [[sval]] field is null.
-
-\hi [[hval]]\quad The hash value of [[sval]].  This field has no
-meaning if [[sval]] is null.
-\hi [[ival]]\quad The integer key.  The field has no meaning if set
-to the constant, [[NOT_AN_IVALUE]].  If the [[AY_STR]] bit is off,
-then every [[ANODE]] will have a valid [[ival]] field.  If the
-[[AY_STR]] bit is on, then the [[ival]] field may or may not be
-valid.
-
-\hi [[cell]]\quad The data field in the hash table.
-
-\smallskip\noindent
-So the value of $A[\expr]$ is stored in the [[cell]] field, and if
-\expr{} is an integer, then \expr{} is stored in [[ival]], else it
-is stored in [[sval]].
-
-
-<<local constants, defs and prototypes>>=
-typedef struct anode {
-   struct anode *slink ;
-   struct anode  *ilink ;
-   STRING *sval ;
-   unsigned hval ;
-   Int     ival ;
-   CELL    cell ;
-} ANODE ;
-
-
-@ Interface Functions
-The interface functions are:
-
-\nobreak
-\hi [[CELL* array_find(ARRAY A, CELL *cp, int create_flag)]] returns a
-pointer to $A[\expr]$ where [[cp]] is a pointer to the [[CELL]]
-holding \expr\/.  If the [[create_flag]] is on and \expr\/ is not
-an element of [[A]], then the element is created with value \Null\/.
-
-\hi [[void array_delete(ARRAY A, CELL *cp)]] removes an element
-$A[\expr]$ from the array $A$.  [[cp]] points at the [[CELL]] holding
-\expr\/.
-
-\hi [[void array_load(ARRAY A, int cnt)]] builds a split array.  The
-values $A[1..{\it cnt}]$ are copied from the array 
-${\it split\_buff}[0..{\it cnt}-1]$.
-
-\hi [[void array_clear(ARRAY A)]] removes all elements of $A$.  The
-type of $A$ is then [[AY_NULL]].
-
-\hi [[STRING** array_loop_vector(ARRAY A, unsigned *sizep)]] 
-returns a pointer
-to a linear vector that holds all the strings that are indices of $A$.
-The size of the the vector is returned indirectly in [[*sizep]].
-If [[A->size==0]], a \Null{} pointer is returned.
-
-\hi [[CELL* array_cat(CELL *sp, int cnt)]] concatenates the elements
-of ${\it sp}[1-cnt..0]$, with each element separated by [[SUBSEP]], to
-compute an array index.  For example, on a reference to $A[i,j]$,
-[[array_cat]] computes $i\circ{\it SUBSEP}\circ j$ where 
-$\circ$ denotes concatenation.
-
-
-<<interface prototypes>>=
-CELL* PROTO(array_find, (ARRAY,CELL*,int)) ;
-void  PROTO(array_delete, (ARRAY,CELL*)) ;
-void  PROTO(array_load, (ARRAY,int)) ;
-void  PROTO(array_clear, (ARRAY)) ;
-STRING** PROTO(array_loop_vector, (ARRAY,unsigned*)) ;
-CELL* PROTO(array_cat, (CELL*,int)) ;
-
-@ Array Find
-Any reference to $A[\expr]$ creates a call to 
-[[array_find(A,cp,CREATE)]] where [[cp]] points at the cell holding
-\expr\/.  The test, $\expr \hbox{ in } A$, creates a call to
-[[array_find(A,cp,NO_CREATE)]].
-
-<<array typedefs and [[#defines]]>>=
-#define NO_CREATE  0
-#define CREATE     1
-
-@
-[[Array_find]] is hash-table lookup that breaks into two cases:
-
-\hi 1)\quad If [[*cp]] is numeric and integer valued, then lookup by
-integer value using [[find_by_ival]].  If [[*cp]] is numeric, but not
-integer valued, then convert to string with [[sprintf(CONVFMT,...)]] and
-go to case~2.
-
-\hi 2)\quad if [[*cp]] is string valued, then lookup by string value
-using [[find_by_sval]].
-
-<<interface functions>>=
-CELL* array_find(A, cp, create_flag)
-   ARRAY A ;
-   CELL *cp ;
-   int create_flag ;
-{
-   ANODE *ap ;
-   if (A->size == 0 && !create_flag) 
-      /* eliminating this trivial case early avoids unnecessary conversions later */
-      return (CELL*) 0 ;
-   switch (cp->type) {
-      case C_DOUBLE:
-	 <<if the [[*cp]] is an integer, find by integer value else find by string value>>
-	 break ;
-      case C_NOINIT:
-	 ap = find_by_sval(A, &null_str, create_flag) ;
-	 break ;
-      default:
-	 ap = find_by_sval(A, string(cp), create_flag) ;
-	 break ;
-   }
-   return ap ? &ap->cell : (CELL *) 0 ;
-}
-
-@
-To test whether [[cp->dval]] is integer, we convert to the nearest
-integer by rounding towards zero (done by [[do_to_I]]) and then cast
-back to double.  If we get the same number we started with, then
-[[cp->dval]] is integer valued.  
-
-<<if the [[*cp]] is an integer, find by integer value else find by string value>>=
-{
-   double d = cp->dval ;
-   Int ival = d_to_I(d) ;
-   if ((double)ival == d) {
-      if (A->type == AY_SPLIT) {
-         if (ival >= 1 && ival <= A->size) 
-            return (CELL*)A->ptr+(ival-1) ;
-         if (!create_flag) return (CELL*) 0 ;
-         convert_split_array_to_table(A) ;
-      }
-      else if (A->type == AY_NULL) make_empty_table(A, AY_INT) ;
-      ap = find_by_ival(A, ival, create_flag) ;
-   }
-   else {
-      /* convert to string */
-      char buff[260] ;
-      STRING *sval ;
-      sprintf(buff, string(CONVFMT)->str, d) ;
-      sval = new_STRING(buff) ;
-      ap = find_by_sval(A,sval,create_flag) ;
-      free_STRING(sval) ;
-   }
-}
-
-@
-When we get to the function [[find_by_ival]], the search has been reduced
-to lookup in a hash table by integer value.
-
-<<local functions>>=
-static ANODE* find_by_ival(A, ival, create_flag)
-   ARRAY A ;
-   Int ival ;
-   int create_flag ;
-{
-   DUAL_LINK *table = (DUAL_LINK*) A->ptr ;
-   unsigned index = ival & A->hmask ;
-   ANODE *p = table[index].ilink ; /* walks ilist */
-   ANODE *q = (ANODE*) 0 ; /* trails p */
-   while(1) {
-      if (!p) {
-	  /* search failed */
-	  <<search by string value if needed and create if needed>>
-	  break ;
-      }
-      else if (p->ival == ival) { 
-	 /* found it, now move to the front */
-	 if (!q) /* already at the front */
-	    return p ;
-	 /* delete for insertion at the front */
-	 q->ilink = p->ilink ;
-	 break ;
-      }
-      q = p ; p = q->ilink ;
-   }
-   /* insert at the front */
-   p->ilink = table[index].ilink ;
-   table[index].ilink = p ;
-   return p ;
-}
-
-@
-When a search by integer value fails, we have to check by string
-value to correctly
-handle the case insertion by [[A["123"]]] and later search as 
-[[A[123]]].  This string search is necessary if and only if the
-[[AY_STR]] bit is set.  An important point is that all [[ANODEs]] get
-created with a valid [[sval]] if [[AY_STR]] is set, because then creation
-of new nodes always occurs in a call to [[find_by_sval]].
-
-<<search by string value if needed and create if needed>>=
-if (A->type & AY_STR) {
-   /* need to search by string */
-   char buff[256] ;
-   STRING *sval ;
-   sprintf(buff, INT_FMT, ival) ;
-   sval = new_STRING(buff) ;
-   p = find_by_sval(A, sval, create_flag) ;
-   free_STRING(sval) ;
-   if (!p) return (ANODE*) 0 ;
-}
-else if (create_flag) {
-   p = ZMALLOC(ANODE) ;
-   p->sval = (STRING*) 0 ;
-   p->cell.type = C_NOINIT ;
-   if (++A->size > A->limit) {
-      double_the_hash_table(A) ; /* changes table, may change index */
-      table = (DUAL_LINK*) A->ptr ;
-      index = A->hmask & ival ;
-   }
-}
-else return (ANODE*) 0 ;
-p->ival = ival ;
-A->type |= AY_INT ;
-
-@
-Searching by string value is easier because [[AWK]] arrays are really
-string associations.  If the array does not have the [[AY_STR]] bit set,
-then we have to convert the array to a dual hash table with strings
-which is done by the function [[add_string_associations]].
-
-<<local functions>>=
-static ANODE* find_by_sval(A, sval, create_flag)
-   ARRAY A ;
-   STRING *sval ;
-   int create_flag ;
-{
-   unsigned hval = ahash(sval) ;
-   char *str = sval->str ;
-   DUAL_LINK *table ;
-   int index ;
-   ANODE *p ;  /* walks list */
-   ANODE *q = (ANODE*) 0 ; /* trails p */
-   if (! (A->type & AY_STR)) add_string_associations(A) ;
-   table = (DUAL_LINK*) A->ptr ;
-   index = hval & A->hmask ;
-   p = table[index].slink ;
-   while(1) {
-      if (!p)  {
-         if (create_flag) {
-	    <<create a new anode for [[sval]]>>
-	    break ;
-	 }
-	 else return (ANODE*) 0 ;
-      }
-      else if (p->hval == hval && strcmp(p->sval->str,str) == 0 ) {
-	 /* found */
-	 if (!q) /* already at the front */
-	    return p ;
-	 else { /* delete for move to the front */
-	    q->slink = p->slink ;
-	    break ;
-	 }
-      }
-      q = p ; p = q->slink ;
-   }
-   p->slink = table[index].slink ;
-   table[index].slink = p ;
-   return p ;
-}
-
-@
-One [[Int]] value is reserved to show that the [[ival]] field is invalid.
-This works because [[d_to_I]] returns a value in [[[-Max_Int, Max_Int]]].
-
-<<local constants, defs and prototypes>>=
-#define NOT_AN_IVALUE (-Max_Int-1)  /* usually 0x80000000 */
-
-<<create a new anode for [[sval]]>>=
-{
-   p = ZMALLOC(ANODE) ;
-   p->sval = sval ;
-   sval->ref_cnt++ ;
-   p->ival = NOT_AN_IVALUE ;
-   p->hval = hval ;
-   p->cell.type = C_NOINIT ;
-   if (++A->size > A->limit) {
-      double_the_hash_table(A) ; /* changes table, may change index */
-      table = (DUAL_LINK*) A->ptr ;
-      index = hval & A->hmask ;
-   }
-}
-
-@
-On entry to [[add_string_associations]], we know that the [[AY_STR]] bit
-is not set. We convert to a dual hash table, then walk all the integer
-lists and put each [[ANODE]] on a string list.
-
-<<local functions>>=
-static void add_string_associations(A)
-   ARRAY A ;
-{
-   if (A->type == AY_NULL) make_empty_table(A, AY_STR) ;
-   else {
-      DUAL_LINK *table ;
-      int i ; /* walks table */
-      ANODE *p ; /* walks ilist */
-      char buff[256] ;
-      if (A->type == AY_SPLIT) convert_split_array_to_table(A) ;
-      table = (DUAL_LINK*) A->ptr ;
-      for(i=0;i <= A->hmask; i++) {
-	 p = table[i].ilink ;
-	 while(p) {
-	    sprintf(buff, INT_FMT, p->ival) ;
-	    p->sval = new_STRING(buff) ;
-	    p->hval = ahash(p->sval) ;
-	    p->slink = table[A->hmask&p->hval].slink ;
-	    table[A->hmask&p->hval].slink = p ;
-	    p = p->ilink ;
-	 }
-      }
-      A->type |= AY_STR ;
-   }
-}
-
-@ Array Delete
-The execution of the statement, $\hbox{\it delete }A[\expr]$, creates a
-call to [[array_delete(ARRAY A, CELL *cp)]].  Depending on the
-type of [[*cp]], the call is routed to [[find_by_sval]] or [[find_by_ival]].
-Each of these functions leaves its return value on the front of an
-slist or ilist, respectively, and then it is deleted from the front of
-the list.  The case where $A[\expr]$ is on two lists, e.g., 
-[[A[12]]] and [[A["12"]]] is checked by examining the [[sval]] and
-[[ival]] fields of the returned [[ANODE*]].
-
-<<interface functions>>=
-void array_delete(A, cp)
-   ARRAY A ;
-   CELL *cp ;
-{
-   ANODE *ap ;
-   if (A->size == 0) return ; 
-   switch(cp->type) {
-      case C_DOUBLE :
-	 {
-	    double d = cp->dval ;
-	    Int ival = d_to_I(d) ;
-	    if ((double)ival == d) <<delete by integer value and return>>
-	    else { /* get the string value */
-	       char buff[260] ;
-	       STRING *sval ;
-	       sprintf(buff, string(CONVFMT)->str, d) ;
-	       sval = new_STRING(buff) ;
-	       ap = find_by_sval(A, sval, NO_CREATE) ;
-	       free_STRING(sval) ;
-	    }
-	 }
-	 break ;
-      case C_NOINIT :
-	 ap = find_by_sval(A, &null_str, NO_CREATE) ;
-	 break ;
-      default :
-	 ap = find_by_sval(A, string(cp), NO_CREATE) ;
-	 break ;
-   }
-   if (ap) { /* remove from the front of the slist */
-      DUAL_LINK *table = (DUAL_LINK*) A->ptr ;
-      table[ap->hval&A->hmask].slink = ap->slink ;
-      <<if [[ival]] is valid, remove [[ap]] from its ilist>>
-      free_STRING(ap->sval) ;
-      cell_destroy(&ap->cell) ;
-      ZFREE(ap) ;
-      <<decrement [[A->size]]>>
-   }
-}
-
-<<delete by integer value and return>>=
-{
-   if (A->type == AY_SPLIT)
-      if (ival >=1 && ival <= A->size) convert_split_array_to_table(A) ;
-      else return ; /* ival not in range */
-   ap = find_by_ival(A, ival, NO_CREATE) ;
-   if (ap) { /* remove from the front of the ilist */
-      DUAL_LINK *table = (DUAL_LINK*) A->ptr ;
-      table[ap->ival & A->hmask].ilink = ap->ilink ;
-      <<if [[sval]] is valid, remove [[ap]] from its slist>>
-      cell_destroy(&ap->cell) ;
-      ZFREE(ap) ;
-      <<decrement [[A->size]]>>
-   }
-   return ;
-}
-
-@
-Even though we found a node by searching an ilist it might also
-be on an slist and vice-versa.
-
-<<if [[sval]] is valid, remove [[ap]] from its slist>>=
-if (ap->sval) {
-   ANODE *p, *q = 0 ;
-   int index = ap->hval & A->hmask ;
-   p = table[index].slink ;
-   while(p != ap) { q = p ; p = q->slink ; }
-   if (q) q->slink = p->slink ;
-   else table[index].slink = p->slink ;
-   free_STRING(ap->sval) ;
-}
-
-<<if [[ival]] is valid, remove [[ap]] from its ilist>>=
-if (ap->ival != NOT_AN_IVALUE) {
-   ANODE *p, *q = 0 ;
-   int index = ap->ival & A->hmask ;
-   p = table[index].ilink ;
-   while(p != ap) { q = p ; p = q->ilink ; }
-   if (q) q->ilink = p->ilink ;
-   else table[index].ilink = p->ilink ;
-}
-
-@
-When the size of a hash table drops below a certain value, it might
-be profitable to shrink the hash table.  Currently we don't do this,
-because our guess is that it would be a waste of time for most
-[[AWK]] applications.  However, we do convert an array to [[AY_NULL]]
-when the size goes to zero which would resize a large hash table 
-that had been completely cleared by successive deletions.
-
-<<decrement [[A->size]]>>=
-if (--A->size == 0) array_clear(A) ;
-
-
-@ Building an Array with Split
-A simple operation is to create an array with the [[AWK]]
-primitive [[split]].  The code that performs [[split]] puts the
-pieces in the global buffer [[split_buff]].  The call
-[[array_load(A, cnt)]] moves the [[cnt]] elements from [[split_buff]] to
-[[A]].  This is the only way an array of type [[AY_SPLIT]] is 
-created.
-
-<<interface functions>>=
-void array_load(A, cnt)
-   ARRAY A ;
-   int cnt ;
-{
-   CELL *cells ; /* storage for A[1..cnt] */
-   int i ;  /* index into cells[] */
-   <<clean up the existing array and prepare an empty split array>>
-   cells = (CELL*) A->ptr ;
-   A->size = cnt ;
-   <<if [[cnt]] exceeds [[MAX_SPLIT]], load from overflow list and adjust [[cnt]]>>
-   for(i=0;i < cnt; i++) {
-      cells[i].type = C_MBSTRN ;
-      cells[i].ptr = split_buff[i] ;
-   }
-}
-
-@
-When [[cnt > MAX_SPLIT]], [[split_buff]] was not big enough to hold
-everything so the overflow went on the [[split_ov_list]].  
-The elements from [[MAX_SPLIT+1]] to [[cnt]] get loaded into
-[[cells[MAX_SPLIT..cnt-1]]] from this list.
-
-<<if [[cnt]] exceeds [[MAX_SPLIT]], load from overflow list and adjust [[cnt]]>>=
-if (cnt > MAX_SPLIT) {
-   SPLIT_OV *p = split_ov_list ;
-   SPLIT_OV *q ;
-   split_ov_list = (SPLIT_OV*) 0 ;
-   i = MAX_SPLIT ;  
-   while( p ) {
-      cells[i].type = C_MBSTRN ;
-      cells[i].ptr = (PTR) p->sval ;
-      q = p ; p = q->link ; ZFREE(q) ;
-      i++ ;
-   }
-   cnt = MAX_SPLIT ;
-}
-
-@
-If the array [[A]] is a split array and big enough then we reuse it,
-otherwise we need to allocate a new split array.
-When we allocate a block of [[CELLs]] for a split array, we round up
-to a multiple of 4.
-
-<<clean up the existing array and prepare an empty split array>>=
-if (A->type != AY_SPLIT || A->limit < cnt) {
-   array_clear(A) ;
-   A->limit = (cnt&~3)+4 ;
-   A->ptr = zmalloc(A->limit*sizeof(CELL)) ;
-   A->type = AY_SPLIT ;
-}
-else
-   for(i=0;i < A->size; i++)  cell_destroy((CELL*)A->ptr+i) ;
-
-@ Array Clear
-The function [[array_clear(ARRAY A)]] converts [[A]] to type [[AY_NULL]]
-and frees all storage used by [[A]] except for the [[struct array]] 
-itself.  This function gets called in two contexts:
-(1)~when an array local to a user function goes out of scope and
-(2)~execution of the [[AWK]] statement, [[delete A]].
-
-<<interface functions>>=
-void array_clear(A)
-   ARRAY A ;
-{
-   int i ;
-   ANODE *p, *q ;
-   if (A->type == AY_SPLIT) {
-      for(i=0;i < A->size; i++) cell_destroy((CELL*)A->ptr+i) ;
-      zfree(A->ptr, A->limit * sizeof(CELL)) ;
-   }
-   else if (A->type & AY_STR) {
-      DUAL_LINK *table = (DUAL_LINK*) A->ptr ;
-      for(i=0;i <= A->hmask; i++) {
-	 p = table[i].slink ;
-	 while(p) {
-	    q = p ; p = q->slink ;
-	    free_STRING(q->sval) ;
-	    cell_destroy(&q->cell) ;
-	    ZFREE(q) ;
-	 }
-      }
-      zfree(A->ptr, (A->hmask+1)*sizeof(DUAL_LINK)) ;
-   }
-   else if (A->type & AY_INT) {
-      DUAL_LINK *table = (DUAL_LINK*) A->ptr ;
-      for(i=0;i <= A->hmask; i++) {
-	 p = table[i].ilink ;
-	 while(p) {
-	    q = p ; p = q->ilink ;
-	    cell_destroy(&q->cell) ;
-	    ZFREE(q) ;
-	 }
-      }
-      zfree(A->ptr, (A->hmask+1)*sizeof(DUAL_LINK)) ;
-   }
-   memset(A, 0, sizeof(*A)) ;
-}
-
-
-
-@ Constructor and Conversions
+\subsection{Construction}
 Arrays are always created as empty arrays of type [[AY_NULL]].
 Global arrays are never destroyed although they can go empty or have
 their type change by conversion.  The only constructor function is
@@ -648,324 +69,567 @@ a macro.
 
 <<array typedefs and [[#defines]]>>=
 #define new_ARRAY()  ((ARRAY)memset(ZMALLOC(struct array),0,sizeof(struct array)))
+@ %def new_ARRAY
+@
+\subsection{Internal Tables}
+String ([[AY_STR]]) and integer ([[AY_INT]]) arrays are implemented with
+internal tables of type [[ITable]].  The operations on [[ITable]]s are,
+
+\I[[make_empty_itable()]] returns a pointer to an empty [[ITable]].
+\I[[itable_free(it)]] empties the table and then frees all memory
+associated with the table.  The table is then totally gone.
+\endhitems
+\noindent
+The main operations performed on a table are done by
+[[itable_find()]].
+
+<<local constants, defines and prototypes>>=
+typedef struct itable ITable ;
+static CELL* itable_find(ITable* it, STRING* sval, int64_t ival, 
+                         int flag, size_t* sizep) ;
+@ %def ITable
 
 @
-Hash tables only get constructed by conversion.  This happens in two
-ways.
-The function [[make_empty_table]] converts an empty array of type
-[[AY_NULL]] to an empty hash table.  The number of lists in the table
-is a power of 2 determined by the constant [[STARTING_HMASK]].
-The limit size of the table is determined by the constant
-[[MAX_AVE_LIST_LENGTH]] which is the largest average size of the hash
-lists that we are willing to tolerate before enlarging the table.
-When [[A->size]] exceeds [[A->limit]],
-the hash table grows in size by doubling the number of lists.
-[[A->limit]] is then reset to [[MAX_AVE_LIST_LENGTH]] times
-[[A->hmask+1]]. 
+The parameters are,
+\I[[it]] find in table [[*it]].
 
-<<local constants, defs and prototypes>>=
-#define STARTING_HMASK    63  /* 2^6-1, must have form 2^n-1 */
-#define MAX_AVE_LIST_LENGTH   12
-#define hmask_to_limit(x) (((x)+1)*MAX_AVE_LIST_LENGTH)
+\I[[sval]] if [[sval]] is non-zero, find by string key [[sval]].  If [[A]]
+is the array represented internally by [[*it]], then the return value
+is a pointer to [[A[sval]]].   
+
+\I[[ival]] if [[sval]] is zero, find by integer key [[ival]].  If [[A]]
+is the array represented internally by [[*it]], then the return value
+is a pointer to [[A[ival]]].   
+
+\I[[flag]] can take three values: [[NO_CREATE]], [[CREATE]] and
+[[DELETE_]].  If [[flag]] is [[NO_CREATE]] and the key is not in
+the table, then zero is returned.  If [[flag]] is [[CREATE]] and
+the key is not in the table, then create a new element in the table
+of [[CELL]] type, [[C_NOINIT]].  If [[flag]] is [[DELETE_]] and
+the key is found, then that element of the table is deleted and
+zero is returned.
+
+\I[[sizep]] if creation or deletion changes the number of elements in the
+table, then [[*sizep]] is set to the new size (+1 the old size on
+creation or -1 the old size on deletion).
+\endhitems
+
+\subsection{Array Type Conversions}
+By specification of the AWK language, an array is an association of
+string value to AWK scalar, [[A[3] = 1]] means [[A["3"] = 1]].
+So in theory, there is only one array type, [[AY_STR]].  In
+practice, [[mawk]] uses [[AY_SPLIT]] and [[AY_INT]] for faster
+performance.  This works fine as long as [[A[3]]] is always accessed
+as [[A[3]]], but while [[A[3]=1; print A["3"]]] is weird, it is
+also correct and must print [[1]].  Handling this example correctly
+requires array [[A]] be converted from [[AY_INT]] to [[AY_STR]].
+There are three conversions,
+\list
+\item{} [[AY_SPLIT]] to [[AY_INT]]
+\item{} [[AY_SPLIT]] to [[AY_STR]]
+\item{} [[AY_INT]] to [[AY_STR]]
+\endlist
+\noindent
+Once converted, an array is never converted back to its original form.
+
+This is [[AY_INT]] to [[AY_STR]].
 
 <<local functions>>=
-static void make_empty_table(A, type)
-   ARRAY A ;
-   int type ; /* AY_INT or AY_STR */
+static void array_int_to_str(ARRAY A)
 {
-   size_t sz = (STARTING_HMASK+1)*sizeof(DUAL_LINK) ;
-   A->type = type ;
-   A->hmask = STARTING_HMASK ;
-   A->limit = hmask_to_limit(STARTING_HMASK) ;
-   A->ptr = memset(zmalloc(sz), 0, sz) ;
+    ITable* ht = (ITable*)A->ptr ;
+    itable_convert_i_to_s(ht) ;
+    A->type = AY_STR ;
 }
+@ %def array_int_to_str
 
-@
-The other way a hash table gets constructed is when a split array is
-converted to a hash table of type [[AY_INT]].
+This is [[AY_SPLIT]] to [[AY_INT]]. Each element of the
+split array is inserted into an integer array.
 
 <<local functions>>=
-static void convert_split_array_to_table(A)
-   ARRAY A ;
+static void array_split_to_int(ARRAY A)
 {
-   CELL *cells = (CELL*) A->ptr ;
-   int i ; /* walks cells */
-   DUAL_LINK *table ;
-   int j ; /* walks table */
-   unsigned entry_limit = A->limit ;
-   <<determine the size of the hash table and allocate>>
-   /* insert each cells[i] in the new hash table on an ilist */
-   for(i=0, j=1 ;i < A->size; i++) {
-      ANODE *p = ZMALLOC(ANODE) ;
-      p->sval = (STRING*) 0 ;
-      p->ival = i+1 ;
-      p->cell = cells[i] ;
-      p->ilink = table[j].ilink ;
-      table[j].ilink = p ;
-      j++ ; j &= A->hmask ;
-   }
-   A->type = AY_INT ;
-   zfree(cells, entry_limit*sizeof(CELL)) ;
+    ITable* tb = make_empty_itable() ;
+    unsigned i ;
+    CELL* cells = (CELL*)A->ptr ;
+    for(i=1; i <= A->size; i++) {
+	size_t unused ;
+        CELL* cp = itable_find(tb,0, i, CREATE, &unused) ;
+	*cp = cells[i-1] ; /* no ref cnt adjustment needed */
+    }
+    zfree(cells, sizeof(CELL) * A->size) ;
+    A->type = AY_INT ;
+    A->ptr = tb ;
+    /* A->size stayed the same */
 }
+@ %def array_split_to_int
 
-@
-To determine the size of the table, we set the initial size to
-[[STARTING_HMASK+1]] and then double the size until
-[[A->size <= A->limit]].
-
-<<determine the size of the hash table and allocate>>=
-A->hmask = STARTING_HMASK ;
-A->limit = hmask_to_limit(STARTING_HMASK) ;
-while(A->size > A->limit) {
-   A->hmask = (A->hmask<<1) + 1 ; /* double the size */
-   A->limit = hmask_to_limit(A->hmask) ;
-}
-{
-   size_t sz = (A->hmask+1)*sizeof(DUAL_LINK) ;
-   A->ptr = memset(zmalloc(sz), 0, sz) ;
-   table = (DUAL_LINK*) A->ptr ;
-}
-
-
-@ Doubling the Size of a Hash Table
-The whole point of making the table size a power of two is to
-facilitate resizing the table.  If the table size is $2^n$ and
-$h$ is the hash key, then $h\bmod 2^n$ is the hash chain index
-which can be calculated with bit-wise and, 
-{\mathchardef~="2026 $h ~ (2^n-1)$}.
-When the table size doubles, the new bit-mask has one more bit
-turned on.  Elements of an old hash chain whose hash value have this bit
-turned on get moved to a new chain. Elements with this bit turned off
-stay on the same chain.  On average only half the old chain moves to the
-new chain.  If the old chain is at ${\it table}[i],\ 0\le i < 2^n$,
-then the elements that move, all move to the new chain at
-${\it table}[i+2^n]$.
+This is [[AY_SPLIT]] to [[AY_STR]].  Each element of the
+split array is inserted into a string array.  This involves
+converting each key to string with [[sprintf()]].
 
 <<local functions>>=
-static void double_the_hash_table(A)
-   ARRAY A ;
+static void array_split_to_str(ARRAY A)
 {
-   unsigned old_hmask = A->hmask ;
-   unsigned new_hmask = (old_hmask<<1)+1 ;
-   DUAL_LINK *table ;
-   <<allocate the new hash table>>
-   <<if the old table has string lists, move about half the string nodes>>
-   <<if the old table has integer lists, move about half the integer nodes>>
-   A->hmask = new_hmask ;
-   A->limit = hmask_to_limit(new_hmask) ;
+    ITable* tb = make_empty_itable() ;
+    unsigned i ;
+    CELL* cells = (CELL*)A->ptr ;
+    for(i=1; i <= A->size; i++) {
+	size_t unused ;
+        char buffer[128] ;
+        STRING* sval ;
+        CELL* cp ; 
+	sprintf(buffer, "%u" , i) ;
+	sval = new_STRING(buffer) ;
+	cp = itable_find(tb, sval, 0, CREATE, &unused) ;
+	*cp = cells[i-1] ; /* no ref cnt adjustment needed */
+	free_STRING(sval) ;
+    }
+    zfree(cells, sizeof(CELL) * A->size) ;
+    A->type = AY_STR ;
+    A->ptr = tb ;
+    /* A->size stayed the same */
 }
+@ %def array_split_to_str
 
+<<local constants, defines and prototypes>>=
+static void array_int_to_str(ARRAY) ;
+static void array_split_to_int(ARRAY) ;
+static void array_split_to_str(ARRAY) ;
 
-<<allocate the new hash table>>=
-A->ptr = zrealloc(A->ptr, (old_hmask+1)*sizeof(DUAL_LINK),
-			  (new_hmask+1)*sizeof(DUAL_LINK)) ;
-table = (DUAL_LINK*) A->ptr ;
-/* zero out the new part which is the back half */
-memset(&table[old_hmask+1], 0, (old_hmask+1)*sizeof(DUAL_LINK)) ;
+@ 
+\section{Array Operations}
+The functions that operate on arrays are,
 
-<<if the old table has string lists, move about half the string nodes>>=
-if (A->type & AY_STR) {
-   int i ; /* index to old lists */
-   int j ; /* index to new lists */
-   ANODE *p ; /* walks an old list */
-   ANODE *q ; /* trails p for deletion */
-   ANODE *tail ; /* builds new list from the back */
-   ANODE dummy0, dummy1 ;
-   for(i=0, j=old_hmask+1;i <= old_hmask; i++, j++) 
-      <<walk one old string list, creating one new string list>>
+\I[[CELL* array_find(ARRAY A, CELL *cp, int create_flag)]] returns a
+pointer to [[A[expr]]] where [[cp]] is a pointer to the [[CELL]]
+holding [[expr]].  If the [[create_flag]] is on and [[expr]] is not
+an element of [[A]], then the element is created with value [[C_NOINIT]].
+
+\I[[void array_delete(ARRAY A, CELL *cp)]] removes an element
+[[A[expr]]] from the array [[A]];  [[cp]] points at the [[CELL]] holding
+[[expr]].
+
+\I[[void array_load(ARRAY A, size_t cnt)]] builds a split array.  The
+values [[A[1..cnt]]] are moved into [[A]] from an anonymous
+buffer with [[transfer_to_array()]] which is declared in
+[[split.h]].
+
+\I[[void array_clear(ARRAY A)]] removes all elements of [[A]].  The
+type of [[A]] is then [[AY_NULL]].
+
+\I[[CELL* array_cat(CELL *sp, int cnt)]] concatenates the elements
+of [[sp[1-cnt..0]]] with each element separated by [[SUBSEP]], to
+compute an array index.  For example, on a reference to [[A[i,j]]],
+[[array_cat]] computes the concatenation expression, [[i SUBSEP j]].
+\endhitems
+
+<<interface prototypes>>=
+CELL* array_find(ARRAY, CELL*, int);
+void  array_delete(ARRAY, CELL*);
+void  array_load(ARRAY, size_t);
+void  array_clear(ARRAY);
+CELL* array_cat(CELL*, int);
+
+@
+There are also interface functions for looping over the indices of
+an array that are detailed later.
+
+@ 
+\subsection{Array Find}
+Any reference to [[A[expr]]] creates a call to
+[[array_find(A,cp,CREATE)]] where [[cp]] points at the cell holding
+[[expr]].  The test, [[expr in  A]], creates a call to
+[[array_find(A,cp,NO_CREATE)]].
+
+<<array typedefs and [[#defines]]>>=
+#define NO_CREATE  0
+#define CREATE     1
+@ %def NO_CREATE CREATE
+
+@
+How [[Array_find]] works depends on the type of the array.
+If the type of the key, [[*cp]], matches the array type, then lookup
+is straightforward; otherwise, the array type needs conversion.
+
+<<interface functions>>=
+CELL* array_find(ARRAY A, CELL *cp, int create_flag)
+{
+    CELL key ; /* a copy of *cp */
+    if (A->size == 0 && !create_flag) {
+        return 0 ;
+    }
+    cellcpy(&key,cp) ;
+reswitch:
+    switch(A->type) {
+	case AY_NULL:
+	    <<make a new integer or string array>>
+	case AY_SPLIT:
+	    <<find in a split array>>
+	case AY_STR:
+	    { 
+		CELL* ret ;
+		cast1_to_s(&key) ;
+		ret = itable_find((ITable*)(A->ptr),string(&key), 0,
+		          create_flag, &A->size) ;
+		free_STRING(string(&key)) ;
+		return ret ;
+	    }
+	case AY_INT:
+	    {
+		if (key.type != C_DOUBLE || !is_int_double(key.dval)) {
+		    array_int_to_str(A) ;
+		    goto reswitch ;
+		}
+		/* the expected case */
+		return itable_find((ITable*)A->ptr, 0, (int64_t)key.dval, 
+		           create_flag, &A->size) ;
+	    }
+    }
+    /* not reached */
+    return 0 ;
+}
+@ %def array_find
+
+If [[1 <= key <= A->size]], then lookup is a simple array reference, else a
+conversion is needed.
+
+<<find in a split array>>=
+{
+    if (key.type != C_DOUBLE || !is_int_double(key.dval)) {
+        array_split_to_str(A) ;
+	goto reswitch ;
+    }
+    if (key.dval < 1.0 || key.dval > (double) A->size) {
+        if (create_flag) {
+	    array_split_to_int(A) ;
+	    goto reswitch ;
+	}
+	else  return 0 ;
+    }
+    else {
+        /* the expected case */
+        CELL* cells = (CELL*)A->ptr ;
+	unsigned d = (unsigned) key.dval ;
+	return &cells[d-1] ;
+    }
 }
 
 @
-As we walk an old string list with pointer [[p]], the expression
-[[p->hval & new_hmask]] takes one of two values.  If it is equal
-to [[p->hval & old_hmask]] (which equals [[i]]), 
-then the node stays otherwise it gets moved
-to a new string list at [[j]].  The new string list preserves order so that
-the positions of the move-to-the-front heuristic are preserved.
-Nodes moving to the new list are appended at pointer [[tail]].
-The [[ANODEs]], [[dummy0]]~and [[dummy1]], are sentinels that remove
-special handling of boundary conditions.
+One element is added to an empty table.  The table type is 
+[[AY_INT]] or [[AY_STR]] depending on the type of the key.
 
-<<walk one old string list, creating one new string list>>=
+<<make a new integer or string array>>=
 {
-   q = &dummy0 ;
-   q->slink = p = table[i].slink ;
-   tail = &dummy1 ;
-   while (p) {
-      if ((p->hval&new_hmask) != i) { /* move it */
-	 q->slink = p->slink ;
-	 tail = tail->slink = p ;
-      }
-      else q = p ;
-      p = q->slink ;
-   }
-   table[i].slink = dummy0.slink ;
-   tail->slink = (ANODE*) 0 ;
-   table[j].slink = dummy1.slink ;
+    ITable* tb = make_empty_itable() ;
+    A->ptr = tb ;
+    A->size = 0 ;
+    if (key.type != C_DOUBLE || !is_int_double(key.dval)) {
+	A->type = AY_STR ;
+	goto reswitch ;
+    }
+    A->type = AY_INT ;
+    return itable_find(tb, 0, (int64_t) key.dval, CREATE, &A->size) ;
 }
 
-@
-The doubling of the integer lists is exactly the same except that
-[[slink]] is replaced by [[ilink]] and [[hval]] is replaced by [[ival]].
 
-<<if the old table has integer lists, move about half the integer nodes>>=
-if (A->type & AY_INT) {
-   int i ; /* index to old lists */
-   int j ; /* index to new lists */
-   ANODE *p ; /* walks an old list */
-   ANODE *q ; /* trails p for deletion */
-   ANODE *tail ; /* builds new list from the back */
-   ANODE dummy0, dummy1 ;
-   for(i=0, j=old_hmask+1;i <= old_hmask; i++, j++) 
-      <<walk one old integer list, creating one new integer list>>
-}
+@ 
+\subsection{Array Delete}
+The execution of the statement, [[delete A[expr]]], creates a
+call to {\hfil\break}[[array_delete(A,cp)]], where [[cp]] points
+at the [[CELL]] holding [[expr]].
+Depending on the type of array [[A]] and the type of [[*cp]],
+the array may undergo type conversion similar to that with
+[[array_find(A,cp)]].  After that, it is a call to
+[[itable_find()]] for deletion. If deletion makes the size zero,
+the array [[type]] becomes [[AY_NULL]].
 
-<<walk one old integer list, creating one new integer list>>=
+<<interface functions>>=
+void array_delete(ARRAY A, CELL* cp)
 {
-   q = &dummy0 ;
-   q->ilink = p = table[i].ilink ;
-   tail = &dummy1 ;
-   while (p) {
-      if ((p->ival&new_hmask) != i) { /* move it */
-	 q->ilink = p->ilink ;
-	 tail = tail->ilink = p ;
-      }
-      else q = p ;
-      p = q->ilink ;
-   }
-   table[i].ilink = dummy0.ilink ;
-   tail->ilink = (ANODE*) 0 ;
-   table[j].ilink = dummy1.ilink ;
-}
+    CELL key ; /* copy of *cp */
+    if (A->type == AY_NULL) return ;
 
-@ Initializing Array Loops
-Our mechanism for dealing with execution of the statement,
+    cellcpy(&key,cp) ;
+reswitch:
+    switch(A->type) {
+        case AY_STR:
+	    cast1_to_s(&key) ;
+	    itable_find((ITable*)A->ptr, string(&key), 0, DELETE_, &A->size) ;
+	    free_STRING(string(&key)) ;
+	    break ;
+	case AY_INT:
+	    if (key.type != C_DOUBLE || !is_int_double(key.dval)) {
+	        array_int_to_str(A) ;
+		goto reswitch ;
+	    }
+	    itable_find((ITable*)A->ptr, 0, (int64_t) key.dval,
+	                DELETE_, &A->size) ;
+	    break ;
+	case AY_SPLIT:
+	    if (key.type != C_DOUBLE || !is_int_double(key.dval)) {
+	        array_split_to_str(A) ;
+	    }
+	    else if (key.dval < 1.0 || key.dval > (double)A->size) {
+	        /* not in the array so nothing to do */
+		return ;
+	    }
+	    else {
+	        array_split_to_int(A) ;
+	    }
+	    goto reswitch ;
+    }
+    if (A->size == 0) array_clear(A) ;
+}
+@ %def array_delete
+
+<<array typedefs and [[#defines]]>>=
+#define DELETE_   2
+@ %def DELETE_
+
+@ 
+\subsection{Building an Array with Split}
+A simple operation is to create an array with the [[AWK]]
+primitive [[split]].  The code that performs [[split]] puts the
+pieces in an anonymous buffer.
+[[array_load(A, cnt)]] moves the [[cnt]] elements from the anonymous
+buffer into [[A]].
+This is the only way an array of type [[AY_SPLIT]] is
+created.
+
+<<interface functions>>=
+void array_load(ARRAY A, size_t cnt)
+{
+    array_clear(A) ;
+    if (cnt > 0) {
+        CELL* cells = (CELL*)zmalloc(sizeof(CELL) * cnt) ;
+	memset(cells, 0, sizeof(CELL) * cnt) ;
+        A->size = cnt ;
+	A->type = AY_SPLIT ;
+	A->ptr = cells ;
+        transfer_to_array(cells, cnt) ;
+    }
+}
+@ %def array_load
+
+@ 
+\subsection{Array Clear}
+The function [[array_clear(ARRAY A)]] converts [[A]] to type [[AY_NULL]]
+and frees all storage used by [[A]] except for the [[struct array]]
+itself.  This function gets called in four contexts:
+(1)~when an array local to a user function goes out of scope,
+(2)~execution of the [[AWK]] statement, [[delete A]],
+(3)~execution of the [[AWK]] statement, [[delete A[expr]]], deletes
+the last element, and
+(4)~when an existing array is used by [[split()]].
+
+<<interface functions>>=
+void array_clear(ARRAY A)
+{
+    if (A->type == AY_NULL) return ;
+
+    if (A->type == AY_SPLIT) {
+        unsigned i ;
+        for(i = 0; i < A->size; i++) {
+            cell_destroy((CELL*)A->ptr+i) ;
+	}
+        zfree(A->ptr, A->size * sizeof(CELL)) ;
+    }
+    else {
+        itable_free((ITable*)A->ptr) ;
+    }
+
+    A->ptr = 0 ;
+    A->size = 0 ;
+    A->type = AY_NULL ;
+}
+@ %def array_clear
+
+
+@ 
+\subsection{Array Loops}
+The loop over the array indices in,
 \medskip
 \centerline{[[for(i in A) {]] {\it statements} [[}]]}
 \medskip
-\noindent 
-is simple. We allocate a vector of [[STRING*]] of size,
-[[A->size]].  Each element of the vector is a string key for~[[A]].
-Note that if the [[AY_STR]] bit of [[A]] is not set, then [[A]]
-has to be converted to a string hash table, because the index
-[[i]] walks string indices.
+\noindent
+is controlled by an [[ALoop]].  The fields in an [[ALoop]] are,
 
-To execute the loop, the only state that needs to be saved is the
-address of [[i]] and an index into the vector of string keys.  Since
-nothing about [[A]] is saved as state, the user
+\I[[type]] is the type of array [[A]].
+
+\I[[size]] is the size of [[A]].
+
+\I[[next]] is an index into the indices of [[A]].
+
+\I[[cp]] is a pointer to the [[CELL]] address of loop variable [[i]].
+
+\I[[link]] is pointer used to put the [[ALoop]] object in a stack, which
+handles nested loops.
+\endhitems
+
+\noindent
+Since the [[ALoop]] object holds all state necessary to run the loop,
+the user
 program can do anything to [[A]] inside the body of
 the loop, even [[delete A]], and the loop
-still works.  Essentially, we have traded data space (the string vector)
-in exchange for implementation simplicity.  On a 32-bit system, each
-[[ANODE]] is 36 bytes, so the extra memory needed for the array loop is
-11\% more than the memory consumed by the [[ANODEs]] of the array.
-Note that the large size of the [[ANODEs]] is indicative of our whole
-design which pays data space for integer lookup speed and algorithm
-simplicity.
+still works.
 
-The only aspect of array loops that occurs in [[array.c]] is construction
-of the string vector.  The rest of the implementation
-is in the file [[execute.c]].
+<<array typedefs and [[#defines]]>>=
+typedef struct aloop {
+    struct aloop* link ;
+    int type ;  /* AY_NULL .. AY_INT */
+    unsigned size ;
+    unsigned next ;
+    CELL* cp ;
+    union {
+        STRING** sval ;  /* for AY_STR */
+	int64_t*  ival ; /* for AY_INT */
+    } ptr ;
+} ALoop ;
+@ %def ALoop
+
+The interface functions are,
+
+\I[[make_aloop(A,cp)]] constructs an [[ALoop]] for looping on
+[[(i in A)]]; [[cp]] is a pointer to the [[CELL]] address of [[i]].
+
+\I[[aloop_free(al)]] destructs and frees all memory held by [[ALoop]], [[al]].
+
+\I[[aloop_next(al)]] puts the next array index into variable, [[i]], at
+[[al->cp]] and returns [[1]]. If the loop is complete, [[i]] is
+unchanged and the return is [[0]].
+\endhitems
+
+\noindent
+Note, that the [[ITable]] interface provides a hook for getting
+the array indices into a vector.
 
 <<interface functions>>=
-STRING** array_loop_vector(A, sizep)
-   ARRAY A ;
-   unsigned *sizep ;
+ALoop* make_aloop(ARRAY A, CELL* cp) 
 {
-   STRING** ret ;
-   *sizep = A->size ;
-   if (A->size > 0) {
-      if (!(A->type & AY_STR)) add_string_associations(A) ;
-      ret = (STRING**) zmalloc(A->size*sizeof(STRING*)) ;
-      <<for each [[ANODE]] in [[A]], put one string in [[ret]]>>
-      return ret ;
-   }
-   else return (STRING**) 0 ;
+    ALoop* al = (ALoop*)zmalloc(sizeof(ALoop)) ;
+    al->type = A->type ;
+    al->size = A->size ;
+    al->next = 0 ;
+    al->cp = cp ;
+    al->link = 0 ;
+    if (al->type == AY_INT) {
+        al->ptr.ival = itable_i_vector((ITable*)(A->ptr)) ;
+#ifdef QSORT
+	qsort(al->ptr.ival, al->size, sizeof(int64_t), i_compare) ;
+#endif
+    }
+    else if (al->type == AY_STR) {
+        al->ptr.sval = itable_s_vector((ITable*)(A->ptr)) ;
+#ifdef QSORT
+	qsort(al->ptr.sval, al->size, sizeof(STRING*), s_compare) ;
+#endif
+    }
+    return al ;
 }
-
-@
-As we walk over the hash table [[ANODEs]], putting each [[sval]] in
-[[ret]], we need to increment each reference count.  The user of the
-return value is responsible for these new reference counts.
-
-<<for each [[ANODE]] in [[A]], put one string in [[ret]]>>=
-{
-   int r = 0 ; /* indexes ret */
-   DUAL_LINK* table = (DUAL_LINK*) A->ptr ;
-   int i ; /* indexes table */
-   ANODE *p ; /* walks slists */
-   for(i=0;i <= A->hmask; i++) {
-      for(p = table[i].slink; p ; p = p->slink) {
-	 ret[r++] = p->sval ;
-	 p->sval->ref_cnt++ ;
-      }
-   }
-}
-
-@ The Hash Function
-Since a hash value is turned into a table index via bit-wise and with
-\hbox{[[A->hmask]]}, it is important that the hash function does a good job
-of scrambling the low-order bits of the returned hash value.
-Empirical tests indicate the following function does an adequate job.
-Note that for strings with length greater than 10, we only hash on 
-the first five characters, the last five character and the length.
+@ %def make_aloop
 
 <<local functions>>=
-static unsigned ahash(sval)
-   STRING* sval ;
+#ifdef QSORT
+static int i_compare(const void* l, const void* r)
 {
-   unsigned sum1 = sval->len ;
-   unsigned sum2 = sum1 ;
-   unsigned char *p , *q ;
-   if (sum1 <= 10) {
-      for(p=(unsigned char*)sval->str; *p ; p++) {
-	 sum1 += sum1 + *p ;
-	 sum2 += sum1 ;
-      }
-   }
-   else {
-      int cnt = 5 ;
-      p = (unsigned char*)sval->str ; /* p starts at the front */
-      q = (unsigned char*)sval->str + (sum1-1) ; /* q starts at the back */
-      while( cnt ) {
-	 cnt-- ;
-	 sum1 += sum1 + *p ;
-	 sum2 += sum1 ;
-	 sum1 += sum1 + *q ;
-	 sum2 += sum1 ;
-	 p++ ; q-- ;
-      }
-   }
-   return sum2 ;
+    const int64_t* il = l ;
+    const int64_t* ir = r ;
+    return *il - *ir ;
 }
 
+static int s_compare(const void* l, const void* r)
+{
+    STRING* const* sl = l ;
+    STRING* const* sr = r ;
+    return STRING_cmp(*sl,*sr) ;
+}
+#endif
+@ %def i_compare s_compare
 
-@ Concatenating Array Indices
+<<local constants, defines and prototypes>>=
+#ifdef QSORT
+static int i_compare(const void*, const void*) ;
+static int s_compare(const void*, const void*) ;
+#endif
+
+<<interface functions>>=
+void aloop_free(ALoop* al)
+{
+    if (al->type == AY_INT) {
+        zfree(al->ptr.ival, sizeof(int64_t) * al->size) ;
+    }
+    else if (al->type == AY_STR) {
+        unsigned i ;
+	for(i=0; i < al->size; i++) {
+	    free_STRING(al->ptr.sval[i]) ;
+	}
+        zfree(al->ptr.sval, sizeof(STRING*) * al->size) ;
+    }
+    zfree(al, sizeof(ALoop)) ;
+}
+@ %def aloop_free
+
+How the loop is indexed depends on the type.
+
+<<interface functions>>=
+int aloop_next(ALoop* al)
+{
+    if (al->next >= al->size) return 0 ;
+    cell_destroy(al->cp) ;
+    switch(al->type) {
+        case AY_SPLIT:
+	    al->cp->type = C_DOUBLE ;
+	    al->cp->dval = (double) (al->next+1) ;
+	    break ;
+	case AY_INT:
+	    al->cp->type = C_DOUBLE ;
+	    al->cp->dval = (double) al->ptr.ival[al->next] ;
+	    break ;
+	case AY_STR:
+	    al->cp->type = C_STRING ;
+	    al->cp->ptr = STRING_dup(al->ptr.sval[al->next]) ;
+	    break ;
+    }
+    al->next++ ;
+    return 1 ;
+}
+@ %def aloop_next
+
+
+<<interface prototypes>>=
+ALoop* make_aloop(ARRAY, CELL*) ;
+void aloop_free(ALoop*) ;
+int aloop_next(ALoop*) ;
+
+
+@ 
+\subsection{Concatenating Array Indices}
 In [[AWK]], an array expression [[A[i,j]]] is equivalent to the
 expression [[A[i SUBSEP j]]], i.e., the index is the
 concatenation of the three
 elements [[i]], [[SUBSEP]] and [[j]].  This is performed by the
 function [[array_cat]].  On entry, [[sp]] points at the top of a
 stack of [[CELLs]].
-[[Cnt]] cells are popped off the stack and concatenated together 
+[[Cnt]] cells are popped off the stack and concatenated together
 separated by [[SUBSEP]] and the result is pushed back on the stack.
 On entry, the first multi-index is in [[sp[1-cnt]]] and the last is
 in [[sp[0]]].  The return value is the new stack top.
 (The stack is the run-time evaluation stack.
 This operation really has nothing to do with array structure, so
-logically this code belongs in [[execute.c]], but remains here for 
+logically this code belongs in [[execute.c]], but remains here for
 historical reasons.)
 
 
 <<interface functions>>=
-CELL *array_cat(sp, cnt)
-   CELL *sp ;
-   int cnt ;
+CELL *array_cat(
+   CELL *sp,
+   int cnt)
 {
    CELL *p ;  /* walks the eval stack */
    CELL subsep ;  /* local copy of SUBSEP */
    <<subsep parts>>
-   unsigned total_len ;  /* length of cat'ed expression */
+   size_t total_len ;  /* length of cat'ed expression */
    CELL *top ;   /* value of sp at entry */
    char *target ;  /* build cat'ed char* here */
    STRING *sval ;  /* build cat'ed STRING here */
@@ -975,34 +639,40 @@ CELL *array_cat(sp, cnt)
    <<build the cat'ed [[STRING]] in [[sval]]>>
    <<cleanup, set [[sp]] and return>>
 }
+@ %def array_cat
 
 @
 We make a copy of [[SUBSEP]] which we can cast to string in the
-unlikely event the user has assigned a number to [[SUBSEP]].  
+unlikely event the user has assigned a number to [[SUBSEP]].
 
 <<subsep parts>>=
-unsigned subsep_len ; /* string length of subsep_str */
-char *subsep_str ;   
+size_t subsep_len ; /* string length of subsep_str */
+char *subsep_str ;
 
 <<get subsep and compute parts>>=
-cellcpy(&subsep, SUBSEP) ;
-if ( subsep.type < C_STRING ) cast1_to_s(&subsep) ;
-subsep_len = string(&subsep)->len ;
-subsep_str = string(&subsep)->str ;
+{
+    cellcpy(&subsep, SUBSEP) ;
+    if ( subsep.type < C_STRING ) cast1_to_s(&subsep) ;
+    subsep_len = string(&subsep)->len ;
+    subsep_str = string(&subsep)->str ;
+}
 
 @
 Set [[sp]] and [[top]] so the cells to concatenate are inclusively
 between [[sp]] and [[top]].
 
 <<set [[top]] and return value of [[sp]]>>=
-top = sp ; sp -= (cnt-1) ;
+{
+    top = sp ; 
+    sp -= (cnt-1) ;
+}
 
 @
-The [[total_len]] is the sum of the lengths of the [[cnt]] 
+The [[total_len]] is the sum of the lengths of the [[cnt]]
 strings and the [[cnt-1]] copies of [[subsep]].
 
 <<cast cells to string and compute [[total_len]]>>=
-total_len = (cnt-1)*subsep_len ;
+total_len = ((size_t) (cnt-1)) * subsep_len ;
 for(p = sp ; p <= top ; p++) {
    if ( p->type < C_STRING ) cast1_to_s(p) ;
    total_len += string(p)->len ;
@@ -1028,65 +698,389 @@ just need to free the strings and set the contents of [[sp]].
 for(p = sp; p <= top ; p++) free_STRING(string(p)) ;
 free_STRING(string(&subsep)) ;
 /* set contents of sp , sp->type > C_STRING is possible so reset */
-sp->type = C_STRING ; 
+sp->type = C_STRING ;
 sp->ptr = (PTR) sval ;
 return sp ;
 
-@ Loose Ends 
-Here are some things we want to make sure end up in the [[.c]] and
-[[.h]] files.
-The compiler needs prototypes for the local functions, and we will
-put a copyright and links to the source file, [[array.w]], in each
-output file.
+@
+\section{Hash Table}
+Up to this point, the internal tables ([[ITable]]) have only
+provided a functional interface. Here is the implementation; 
+it is a hash table.  A different design such as red-black tree
+could be used to provide the same interface.
 
-<<local constants, defs and prototypes>>=
-static ANODE* PROTO(find_by_ival,(ARRAY, Int, int)) ;
-static ANODE* PROTO(find_by_sval,(ARRAY, STRING*, int)) ;
-static void PROTO(add_string_associations,(ARRAY)) ;
-static void PROTO(make_empty_table,(ARRAY, int)) ;
-static void PROTO(convert_split_array_to_table,(ARRAY)) ;
-static void PROTO(double_the_hash_table,(ARRAY)) ;
-static unsigned PROTO(ahash, (STRING*)) ;
+The hash table design was influenced by 
+and is similar to
+the design presented in Griswold and Townsend,
+{\sl The Design and Implementation of
+Dynamic Hashing Sets and Tables in Icon},
+{\bf Software Practice and Experience}, 23, 351-367, 1993.
+
+@
+\subsection{Data Structure}
+Each element of the table is an [[HNODE]].  If the keys
+are integer ([[AY_INT]]), then the key is [[ival]].
+If the keys are [[STRING*]] ([[AY_STR]]), then the key
+is [[key]].  Note that an [[ITable]] holds no information
+about array type.
+
+The fields are,
+\I[[link]] connects [[HNODE]]s into buckets of singly linked list.
+\I[[key]]  the node is keyed on [[STRING*]] value if [[key]] is not zero.
+\I[[ival]] if [[key]] is zero, the node is keyed on this integer value.
+\I[[cell]] the value looked up by either [[key]] or [[ival]].
+\endhitems
+
+<<hash table declarations and data>>=
+typedef struct hnode {
+    struct hnode* link ;
+    int64_t ival ;
+    STRING* key ;
+    CELL cell ;
+} HNODE ;
+@ %def HNODE
+
+Each bucket of a hash table is a linked list of [[HNODE]]s.
+The number of buckets is always a power of 2.  If the
+number of buckets is [[2^n]], then the [[hmask]] is
+[[2^n-1]].  For [[HNODE* p]], [[p]] is on the linked list
+starting at [[buckets[table->hmask & p->ival]]. 
 
 
-<<array.c notice>>=
+<<hash table declarations and data>>=
+#define INIT_HMASK   255
+#define MAX_AVE_BUCKET_SIZE   4
+struct itable {
+    unsigned hmask ;
+    unsigned size ;
+    unsigned limit ;
+    HNODE** buckets ;
+} ;
+@ %def itable
+@ %def INIT_HMASK
+@ %def MAX_AVE_BUCKET_SIZE 
+
+<<hash table functions>>=
+static ITable* make_empty_itable()
+{
+    ITable* ret = ZMALLOC(ITable) ;
+    ret->hmask = INIT_HMASK ;
+    ret->size = 0 ;
+    ret->limit = MAX_AVE_BUCKET_SIZE * (INIT_HMASK+1) ;
+    ret->buckets = make_buckets(INIT_HMASK+1) ;
+    return ret ;
+}
+@ %def make_empty_itable
+
+<<hash table functions>>=
+static HNODE** make_buckets(unsigned cnt)
+{
+    HNODE** bks = (HNODE**)emalloc(cnt * sizeof(HNODE*)) ;
+    memset(bks, 0, cnt * sizeof(HNODE*)) ;
+    return bks ;
+}
+@ %def make_buckets
+
+<<hash table declarations and data>>=
+static HNODE** make_buckets(unsigned) ;
+static ITable* make_empty_itable(void) ;
+    
+@
+\subsection{Find, Create and Delete}
+
+<<hash table functions>>=
+CELL* itable_find(ITable* htable, STRING* sval, int64_t ival, 
+                  int flag, size_t* szp) 
+{
+    int64_t hash = sval ? hash2(sval->str,sval->len) : ival ;
+    unsigned idx = (unsigned) hash & htable->hmask ;
+    HNODE* q = 0 ;
+    HNODE* p = htable->buckets[idx] ;
+    while(p) {
+        if (hash == p->ival && (!sval || STRING_eq(sval,p->key))) {
+	    /* found */
+	    if (flag == DELETE_) {
+	        <<delete [[p]] and return [[0]]>>
+	    }
+	    if (q) {
+	        /* move to front */
+		q->link = p->link ;
+		p->link = htable->buckets[idx] ;
+		htable->buckets[idx] = p ;
+	    }  /* else at front */
+	    return &p->cell ;
+	}
+	q = p ;
+	p = p->link ;
+    }
+    /* not found */
+    if (flag == CREATE) {
+        <<create a new node at [[p]] and insert in [[htable]] at [[buckets[idx]]]>>
+	return &p->cell ;
+    }
+    return 0 ;
+}
+@ %def itable_find
+
+<<delete [[p]] and return [[0]]>>=
+{
+    htable->size-- ;
+    *szp = htable->size ;
+    if (q) {
+	q->link = p->link ;
+    }
+    else {
+	htable->buckets[idx] = p->link ;
+    }
+    hnode_free(p) ;
+    return 0 ;
+}
+
+@
+Function, [[hnode_free(p)]], frees all memory used by [[HNODE]], [[*p]].
+Function, [[htable_free(ht)]], frees all memory used by
+[[ITable]], [[*ht]].
+
+<<hash table functions>>=
+static void hnode_free(HNODE* p)
+{
+    if (p->key) free_STRING(p->key) ;
+    cell_destroy(&p->cell) ;
+    zfree(p, sizeof(HNODE)) ;
+}
+static void itable_free(ITable* ht)
+{
+    unsigned i ;
+    unsigned size = ht->size ;
+    for(i=0; size > 0; i++) {
+        HNODE* p = ht->buckets[i] ;
+	while(p) {
+	    HNODE* q = p ;
+	    p = p->link ;
+	    hnode_free(q) ;
+	    size-- ;
+	}
+    }
+    free(ht->buckets) ;
+    zfree(ht, sizeof(ITable)) ;
+}
+@ %def hnode_free
+@ %def itable_free
+
+<<create a new node at [[p]] and insert in [[htable]] at [[buckets[idx]]]>>=
+{
+    p = ZMALLOC(HNODE) ;
+    p->key = sval ? STRING_dup(sval) : 0 ;
+    p->ival = hash ;
+    p->cell.type = C_NOINIT ;
+    p->link = htable->buckets[idx] ;
+    htable->buckets[idx] = p ;
+    htable->size++ ;
+    *szp = htable->size ;
+    if (htable->size > htable->limit) {
+	double_num_buckets(htable) ;
+    }
+}
+
+<<hash table declarations and data>>=
+static void hnode_free(HNODE*) ;
+static void itable_free(ITable*) ;
+
+@
+Function, [[itable_convert_i_to_s(ht)]], takes as input a hash table
+keyed on integers ([[ival]]), converts each integer key to a 
+string key via [[sprintf()]], and rebuilds the table on the
+string keys.
+
+<<hash table functions>>=
+static void itable_convert_i_to_s(ITable* ht)
+{
+    char buffer[256] ;
+    unsigned hmask = ht->hmask ;
+    HNODE** new_buckets = make_buckets(hmask+1) ;
+    unsigned i ;  /* walks old buckets */
+    unsigned j ;  /* index into new_buckets */
+    unsigned cnt = ht->size ;  /* number of nodes to convert */
+    for(i=0; cnt > 0; i++) {
+        HNODE* p = ht->buckets[i] ;
+	while(p) {
+	    HNODE* q = p ;
+	    p = p->link ;
+            sprintf(buffer, LDFMT, q->ival) ;
+	    q->key = new_STRING(buffer) ;
+	    q->ival = hash(buffer) ;
+	    j = q->ival & hmask ;
+	    q->link = new_buckets[j] ;
+	    new_buckets[j] = q ;
+	    cnt-- ;
+	}
+    }
+    free(ht->buckets) ;
+    ht->buckets = new_buckets ;
+}
+@ %def itable_convert_i_to_s
+
+<<hash table declarations and data>>=
+static void itable_convert_i_to_s(ITable*) ;
+
+@
+\subsection{Doubling the Number of Hash Buckets}
+The whole point of making the number of buckets a power of two is to
+facilitate resizing.  If the number of buckets is [[2^n]]
+and [[h]] is the hash key, then [[h & 2^n-1]] is the hash bucket index.
+When the number of buckets doubles, the new bit-mask has one more bit
+turned on.  Elements of an old hash bucket, whose hash value have this bit
+turned on, get moved to a new bucket. Elements, with this bit turned off,
+stay in the same bucket.  On average only half the old bucket moves to the
+new bucket.
+If the old bucket is at [[buckets[i]]] for [[i < 2^n]], then the
+elements that move, all move to the new bucket at
+[[buckets[i+2^n]]].
+
+<<hash table functions>>=
+static void double_num_buckets(ITable* htable)
+{
+   unsigned old_hmask = htable->hmask ;
+   unsigned new_hmask = (old_hmask<<1)+1 ;
+   HNODE** buckets = htable->buckets ;
+   buckets = (HNODE**)erealloc(buckets, sizeof(HNODE*) * (new_hmask+1)) ;
+   <<move about half the [[HNODE]]s>>
+   htable->hmask = new_hmask ;
+   htable->limit = (new_hmask+1) * MAX_AVE_BUCKET_SIZE ;
+   htable->buckets = buckets ;
+}
+@ %def double_the_hash_table
+
+<<move about half the [[HNODE]]s>>=
+{
+    HNODE* p ;  /* walks bucket[i] */
+    HNODE* q ;  /* trails p */
+    HNODE* tail ; /* builds bucket[j] from the back */
+    HNODE p0 ;  /* sentinel */
+    HNODE t0 ;  /* sentinel */
+    unsigned i, j ;
+
+    for(i=0, j=old_hmask+1; i < old_hmask+1; i++, j++) {
+        p = buckets[i] ;
+	q = &p0 ;
+	q->link = p ;
+	tail = &t0 ;
+	tail->link = 0 ;
+
+	while(p) {
+	    if (p->ival & (old_hmask+1)) {
+	        /* it moves */
+		q->link = p->link ;
+		tail = tail->link = p ;
+		tail->link = 0 ;
+		p = q->link ;
+	    }
+	    else {
+	        q = p ;
+		p = p->link ;
+	    }
+	}
+	buckets[i] = p0.link ;
+	buckets[j] = t0.link ;
+    }
+}
+
+<<hash table declarations and data>>=
+static void double_num_buckets(ITable*) ;
+        
+@
+\subsection{Loop Vectors}
+Creating index vectors for array loops walks over all the
+table nodes placing each lookup key in a vector.
+
+<<hash table functions>>=
+static int64_t*  itable_i_vector(ITable* it)
+{
+    int64_t* ret = (int64_t*)zmalloc(sizeof(int64_t)*it->size) ;
+    unsigned r = 0 ;
+    unsigned i ;
+    for(i=0; r < it->size; i++) {
+        HNODE* p = it->buckets[i] ;
+	while(p) {
+	    ret[r++] = p->ival ;
+	    p = p->link ;
+	}
+    }
+    return ret ;
+}
+@ %def itable_i_vector
+
+<<hash table functions>>=
+static STRING**  itable_s_vector(ITable* it)
+{
+    STRING** ret = (STRING**)zmalloc(sizeof(STRING*)*it->size) ;
+    unsigned r = 0 ;
+    unsigned i ;
+    for(i=0; r < it->size; i++) {
+        HNODE* p = it->buckets[i] ;
+	while(p) {
+	    ret[r++] = STRING_dup(p->key) ;
+	    p = p->link ;
+	}
+    }
+    return ret ;
+}
+@ %def itable_s_vector
+
+<<hash table declarations and data>>=
+static int64_t* itable_i_vector(ITable*) ;
+static STRING** itable_s_vector(ITable*) ;
+@
+\section{Source Files}
+
+<<"array.h">>=
+/* array.h */
+<<blurb>>
+#ifndef ARRAY_H
+#define ARRAY_H 1
+
+#include "types.h"
+
+<<array typedefs and [[#defines]]>>
+<<interface prototypes>>
+#endif /* ARRAY_H */
+
+<<"array.c">>=
+/* array.c */
+<<blurb>>
+#include "mawk.h"
+#include "int.h"
+#include "symtype.h"
+#include "memory.h"
+#include "split.h"
+#include "field.h"
+#include "bi_vars.h"
+<<local constants, defines and prototypes>>
+<<hash table declarations and data>>
+<<interface functions>>
+<<local functions>>
+<<hash table functions>>
+
+<<blurb>>=
 /*
-array.c 
-<<mawk blurb>>
-*/
-
-/*
-This file was generated with the command
-
-   notangle -R'"array.c"' array.w > array.c
-
-<<notangle blurb>>
-*/
-
-<<notangle blurb>>=
-Notangle is part of Norman Ramsey's noweb literate programming package
-available from CTAN(ftp.shsu.edu).
-
-It's easiest to read or modify this file by working with array.w.
-<<array.h notice>>=
-/*
-array.h 
-<<mawk blurb>>
-*/
-
-/*
-This file was generated with the command
-
-   notangle -R'"array.h"' array.w > array.h
-
-<<notangle blurb>>
-*/
-
-<<mawk blurb>>=
-copyright 1991-96, Michael D. Brennan
+copyright 1991-1996,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+array.c and array.h were generated with the commands
+
+   notangle -R'"array.c"' array.w > array.c 
+   notangle -R'"array.h"' array.w > array.h 
+
+Notangle is part of Norman Ramsey's noweb literate programming package.
+Noweb home page: http://www.cs.tufts.edu/~nr/noweb/
+
+It's easiest to read or modify this file by working with array.w.
+*/
+
+@
+\idindex

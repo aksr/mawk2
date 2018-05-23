@@ -1,37 +1,42 @@
-
 /********************************************
 repl.h
-copyright 1991, Michael D. Brennan
+copyright 1991,1993,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: repl.h,v $
- * Revision 1.1.1.1  1993/07/03  18:58:19  mike
- * move source to cvs
- *
- * Revision 5.1  1991/12/05  07:59:32  brennan
- * 1.1 pre-release
- *
-*/
-
 /* repl.h */
+/* replacement */
 
 #ifndef  REPL_H
 #define  REPL_H
 
-PTR  PROTO( re_compile, (STRING *) ) ;
-char *PROTO( re_uncompile, (PTR) ) ;
+#include "types.h"
 
+PTR re_compile(const STRING *);
+const STRING* re_uncompile(PTR);
 
-CELL *PROTO( repl_compile, (STRING *) ) ;
-char *PROTO( repl_uncompile, (CELL *) ) ;
-void  PROTO( repl_destroy, (CELL *) ) ;
-CELL *PROTO( replv_cpy, (CELL *, CELL *) ) ;
-CELL *PROTO( replv_to_repl, (CELL *, STRING *) ) ;
+typedef struct {
+    unsigned cnt;		/* number of pieces */
+    unsigned amp_cnt;		/* number of & */
+    STRING **pieces;
+    size_t piece_len;
+} Replv_Data;
+
+void replacement_scan(const STRING *, CELL *);
+const STRING *repl_unscan(CELL *);
+
+/* only C_REPL needs anything freed */
+#define repl_destroy(cp) do{ \
+     if((cp)->type == C_REPL) { \
+         free_STRING(string(cp)) ; \
+     }} while(0)
 
 #endif

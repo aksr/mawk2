@@ -1,27 +1,17 @@
 
 /********************************************
 bi_vars.h
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
-
-
-/* $Log: bi_vars.h,v $
- * Revision 1.1.1.1  1993/07/03  18:58:09  mike
- * move source to cvs
- *
- * Revision 5.2  1992/07/10  16:17:10  brennan
- * MsDOS: remove NO_BINMODE macro
- *
- * Revision 5.1  1991/12/05  07:59:05  brennan
- * 1.1 pre-release
- *
-*/
 
 
 /* bi_vars.h */
@@ -32,11 +22,11 @@ the GNU General Public License, version 2, 1991.
 
 /* builtin variables NF, RS, FS, OFMT are stored
    internally in field[], so side effects of assignment can
-   be handled 
+   be handled
 */
 
 /* NR and FNR must be next to each other */
-#define  NR	   bi_vars  
+#define  NR	   bi_vars
 #define  FNR	   (bi_vars+1)
 #define  ARGC      (bi_vars+2)
 #define  FILENAME  (bi_vars+3)
@@ -46,7 +36,7 @@ the GNU General Public License, version 2, 1991.
 #define  RSTART    (bi_vars+7)
 #define  SUBSEP    (bi_vars+8)
 
-#if  MSDOS 
+#if  MSDOS
 #define  BINMODE   (bi_vars+9)
 #define  NUM_BI_VAR  10
 #else

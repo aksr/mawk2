@@ -1,195 +1,165 @@
 
 /********************************************
 zmalloc.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: zmalloc.c,v $
- * Revision 1.6  1995/06/06  00:18:35  mike
- * change mawk_exit(1) to mawk_exit(2)
- *
- * Revision 1.5  1995/03/08  00:06:26  mike
- * add a pointer cast
- *
- * Revision 1.4  1993/07/14  12:45:15  mike
- * run thru indent
- *
- * Revision 1.3	 1993/07/07  00:07:54  mike
- * more work on 1.2
- *
- * Revision 1.2	 1993/07/03  21:15:35  mike
- * bye bye yacc_mem
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:23  mike
- * move source to cvs
- *
- * Revision 5.4	 1993/02/13  21:57:38  mike
- * merge patch3
- *
- * Revision 5.3	 1993/01/14  13:12:33  mike
- * casts in front of malloc
- *
- * Revision 5.1.1.1  1993/02/06	 11:12:19  mike
- * fix bug in reuse of parser table memory
- * for most users ifdef the mess out
- *
- * Revision 5.1	 1991/12/05  07:56:35  brennan
- * 1.1 pre-release
- *
-*/
-
-/*  zmalloc.c  */
 #include  "mawk.h"
 #include  "zmalloc.h"
 
-
-
-/*
-  zmalloc() gets mem from malloc() in CHUNKS of 2048 bytes
-  and cuts these blocks into smaller pieces that are multiples
-  of eight bytes.  When a piece is returned via zfree(), it goes
-  on a linked linear list indexed by its size.	The lists are
-  an array, pool[].
-
-  E.g., if you ask for 22 bytes with p = zmalloc(22), you actually get
-  a piece of size 24.  When you free it with zfree(p,22) , it is added
-  to the list at pool[2].
-*/
-
-#define POOLSZ	    16
-
-#define	 CHUNK		256
- /* number of blocks to get from malloc */
-
-static void PROTO(out_of_mem, (void)) ;
-
-
 static void
-out_of_mem()
+out_of_mem(void)
 {
-   static char out[] = "out of memory" ;
+   const char* out = "out of memory" ;
 
    if (mawk_state == EXECUTION)	 rt_error(out) ;
    else
    {
       /* I don't think this will ever happen */
-      compile_error(out) ; mawk_exit(2) ; 
+      compile_error(out) ; mawk_exit(2) ;
    }
 }
 
-
-typedef union zblock
+void* emalloc(size_t sz)
 {
-   char dummy[ZBLOCKSZ] ;
-   union zblock *link ;
-} ZBLOCK ;
+    void* ret = malloc(sz) ;
+    if (ret == 0) out_of_mem() ;
+    return ret ;
+}
 
-/* ZBLOCKS of sizes 1, 2, ... 16
-   which is bytes of sizes 8, 16, ... , 128
-   are stored on the linked linear lists in
-   pool[0], pool[1], ... , pool[15]
+void* erealloc(void* p, size_t sz)
+{
+    void* ret = realloc(p, sz) ;
+    if (ret == 0) out_of_mem() ;
+    return ret ;
+}
+
+/* if we are valgrinding or purifying */
+
+#ifdef  MEM_CHECK
+
+void* zmalloc(size_t sz)
+{
+    return emalloc(sz) ;
+}
+
+void* zrealloc(void* p, size_t old, size_t new)
+{
+    return erealloc(p,new) ;
+}
+
+void zfree(void* p, size_t sz)
+{
+    free(p) ;
+}
+
+#else    /* usual  case */
+/*
+  zmalloc() gets mem from emalloc() in chunks of ZSIZE * AVAIL_SZ
+  and cuts these blocks into smaller pieces that are multiples ZSIZE.
+  When a piece is returned via zfree(), it goes
+  on a linked linear list indexed by its size.	The lists are
+  an array, pool[].
 */
 
-static ZBLOCK *pool[POOLSZ] ;
+/* block sizes are set by this #define */
 
-/* zmalloc() is a macro in front of bmalloc "BLOCK malloc" */
+#define  ZSZ    (4*sizeof(long))
 
-PTR
-bmalloc(blocks)
-   register unsigned blocks ;
+typedef union zblock {
+    union zblock* link ;
+    double align ;
+    char filler[ZSZ] ;
+} ZBlock ;
+
+#define  ZSIZE  sizeof(ZBlock)
+
+#define  bytes_to_blocks(b) (((b)+ZSIZE-1)/ZSIZE)
+
+/* memory from emalloc goes here to be partitioned into
+   smaller pieces  that end up in pool[]
+*/
+
+static ZBlock* avail ;
+static size_t amt_avail ;
+
+#define AVAIL_SZ    1024    /* number of ZBlocks to get from emalloc */
+
+static void
+fill_avail(void)
 {
-   register ZBLOCK *p ;
-   static unsigned amt_avail ;
-   static ZBLOCK *avail ;
-
-   if (blocks > POOLSZ)
-   {
-      p = (ZBLOCK *) malloc(blocks << ZSHIFT) ;
-      if (!p)  out_of_mem() ;
-      return (PTR) p ;
-   }
-
-   if (p = pool[blocks - 1])
-   {
-      pool[blocks - 1] = p->link ;
-      return (PTR) p ;
-   }
-
-   if (blocks > amt_avail)
-   {
-      if (amt_avail != 0)	/* free avail */
-      {
-	 avail->link = pool[--amt_avail] ;
-	 pool[amt_avail] = avail ;
-      }
-
-      if (!(avail = (ZBLOCK *) malloc(CHUNK * ZBLOCKSZ)))
-      {
-	 /* if we get here, almost out of memory */
-	 amt_avail = 0 ;
-	 p = (ZBLOCK *) malloc(blocks << ZSHIFT) ;
-	 if (!p)  out_of_mem() ;
-	 return (PTR) p ;
-      }
-      else  amt_avail = CHUNK ;
-   }
-
-   /* get p from the avail pile */
-   p = avail ; avail += blocks ; amt_avail -= blocks ; 
-   return (PTR) p ;
+    avail = (ZBlock *)emalloc(ZSIZE * AVAIL_SZ) ;
+    amt_avail = AVAIL_SZ ;
 }
 
-void
-bfree(p, blocks)
-   register PTR p ;
-   register unsigned blocks ;
-{
+#define  POOL_SZ    16
+static ZBlock* pool[POOL_SZ] ;
+/* size of biggest block in pool[] */
+#define zmalloc_limit  (16*ZSIZE)
 
-   if (blocks > POOLSZ)	 free(p) ;
-   else
-   {
-      ((ZBLOCK *) p)->link = pool[--blocks] ;
-      pool[blocks] = (ZBLOCK *) p ;
-   }
+void* zmalloc(size_t sz)
+{
+    if (sz > zmalloc_limit) {
+        return emalloc(sz) ;
+    }
+    {
+        size_t  blks = bytes_to_blocks(sz) ;
+	ZBlock* p = pool[blks-1] ;
+	if (p) {
+	    /* get mem from pool */
+	    pool[blks-1] = p->link ;
+	    return p ;
+	}
+
+	if (blks > amt_avail) {
+	    if (amt_avail > 0) {
+		avail->link = pool[amt_avail-1] ;
+	        pool[amt_avail-1] = avail ;
+	    }
+	    fill_avail() ;
+	}
+        /* cut a piece off the avail block */
+	p = avail ;
+	avail += blks ;
+	amt_avail -= blks ;
+	return p ;
+    }
 }
 
-PTR
-zrealloc(p, old_size, new_size)
-   register PTR p ;
-   unsigned old_size, new_size ;
+void zfree(void* p, size_t sz)
 {
-   register PTR q ;
-
-   if (new_size > (POOLSZ << ZSHIFT) &&
-       old_size > (POOLSZ << ZSHIFT))
-   {
-      if (!(q = realloc(p, new_size)))	out_of_mem() ;
-   }
-   else
-   {
-      q = zmalloc(new_size) ;
-      memcpy(q, p, old_size < new_size ? old_size : new_size) ;
-      zfree(p, old_size) ;
-   }
-   return q ;
+    if (sz > zmalloc_limit) {
+        free(p) ;
+    }
+    else {
+	/* put p in pool[] */
+        size_t blks = bytes_to_blocks(sz) ;
+	ZBlock* zp = (ZBlock*) p ;
+	zp->link = pool[blks-1] ;
+	pool[blks-1] = zp ;
+    }
 }
 
-
-
-#ifndef	 __GNUC__
-/* pacifier for Bison , this is really dead code */
-PTR
-alloca(sz)
-   unsigned sz ;
+void* zrealloc(void* p, size_t old_size, size_t new_size)
 {
-   /* hell just froze over */
-   exit(100) ;
-   return (PTR) 0 ;
+    if (new_size > zmalloc_limit && old_size > zmalloc_limit) {
+        return erealloc(p,new_size) ;
+    }
+    else {
+        void* ret = zmalloc(new_size) ;
+        memcpy(ret, p, old_size < new_size ? old_size : new_size) ;
+        zfree(p, old_size) ;
+	return ret ;
+    }
 }
+
 #endif

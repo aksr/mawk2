@@ -1,247 +1,156 @@
 
 /********************************************
 rexp0.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: rexp0.c,v $
- *Revision 1.5  1996/11/08 15:39:27  mike
- *While cleaning up block_on, I introduced a bug. Now fixed.
- *
- *Revision 1.4  1996/09/02 18:47:09  mike
- *Allow []...] and [^]...] to put ] in a class.
- *Make ^* and ^+ syntax errors.
- *
- * Revision 1.3  1994/12/26  16:37:52  mike
- * 1.1.2 fix to do_str was incomplete -- fix it
- *
- * Revision 1.2  1993/07/23  13:21:38  mike
- * cleanup rexp code
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:27  mike
- * move source to cvs
- *
- * Revision 3.8	 1992/04/21  20:22:38  brennan
- * 1.1 patch2
- * [c1-c2] now works if c2 is an escaped character
- *
- * Revision 3.7	 1992/03/24  09:33:12  brennan
- * 1.1 patch2
- * When backing up in do_str, check if last character was escaped
- *
- * Revision 3.6	 92/01/21  17:32:51  brennan
- * added some casts so that character classes work with signed chars
- *
- * Revision 3.5	 91/10/29  10:53:57  brennan
- * SIZE_T
- *
- * Revision 3.4	 91/08/13  09:10:05  brennan
- * VERSION .9994
- *
- * Revision 3.3	 91/07/19  07:29:24  brennan
- * backslash at end of regular expression now stands for backslash
- *
- * Revision 3.2	 91/07/19  06:58:23  brennan
- * removed small bozo in processing of escape characters
- *
- * Revision 3.1	 91/06/07  10:33:20  brennan
- * VERSION 0.995
- *
- * Revision 1.2	 91/06/05  08:59:36  brennan
- * changed RE_free to free
- *
- * Revision 1.1	 91/06/03  07:10:15  brennan
- * Initial revision
- *
-*/
 
 /*  lexical scanner  */
 
 #include  "rexp.h"
 
-/* static functions */
-static int PROTO(do_str, (int, char **, MACHINE *)) ;
-static int PROTO(do_class, (char **, MACHINE *)) ;
-static int PROTO(escape, (char **)) ;
-static BV *PROTO(store_bvp, (BV *)) ;
-static int PROTO(ctohex, (int)) ;
+static int do_str(int, const char **, MACHINE *) ;
+static int do_class(const char **, MACHINE *) ;
+static int escape(const char **) ;
+/*static BV *store_bvp(BV *) ;*/
+static int ctohex(int) ;
+
+static const BV* do_named_cc(const char**) ;
 
 
-#ifndef	 EG	
-/* make next array visible */
-static
-#endif
-char  RE_char2token[ '|' + 1 ] = {
-0,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,
-13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,9,13,13,13,
-6,7,3,4,13,13,10,13,13,13,13,13,13,13,13,13,13,13,13,13,13,
-13,13,5,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,
-13,13,13,13,13,13,13,13,13,13,11,12,13,8,13,13,13,13,13,13,
-13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,
-13,13,13,13,1} ;
+/* auto-generated with mktoken.c  */
+/* if token defs in rexp.h change then this needs regeneration */
+static unsigned char REchar2token[256] = {
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13,  9, 13, 13, 13,  6,  7,  3,  4, 13, 13, 10, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,  5,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 11, 12, 13,  8, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,  1, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13
+};
 
-#define	 char2token(x) \
-( (unsigned char)(x) > '|' ? T_CHAR : RE_char2token[x] )
 
 #define NOT_STARTED    (-1)
 
-static int prev ;
-static char *lp ;		 /*  ptr to reg exp string  */
-static unsigned re_len ;
+static int prev ;       /* previous token */
+static const char *lp ;		 /*  ptr into reg exp string  */
+static const char* re_str ;   /* parsing this string */
+static const char* re_end ;   /* end of re_str */
+
 
 
 void
-RE_lex_init(re)
-   char *re ;
+RE_lex_init(const char* re, size_t len)
 {
-   lp = re ;
-   re_len = strlen(re) + 1 ;
-   prev = NOT_STARTED ;
-   RE_run_stack_init() ;
+    lp = re_str = re ;
+    re_end = lp + len ;
+    prev = NOT_STARTED ;
+    RE_run_stack_init() ;
 }
 
 
 int
-RE_lex(mp)
-   MACHINE *mp ;
+RE_lex(MACHINE* mp)
 {
-   register int c ;
+    int c ;
 
-reswitch:
-   switch (c = char2token(*lp))
-   {
-      case T_PLUS:
-      case T_STAR:
-	 if (prev == T_START) RE_error_trap(6) ;
-	 /* fall thru */
+    if (lp >= re_end) return 0 ;
 
-      case T_OR:
-      case T_Q:
-      case T_RP:
-	 lp++ ;	 return	 prev = c ;
+    switch (c = REchar2token[*(const unsigned char*)lp]) {
+        case T_PLUS:
+        case T_STAR:
+        case T_OR:
+        case T_Q:
+        case T_RP:
+	    lp++ ;
+	    return  prev = c ;
 
-      case T_SLASH:
-	 break ;
+        case T_LP:
+	    switch (prev) {
+		case T_CHAR:
+		case T_STR:
+		case T_ANY:
+		case T_CLASS:
+		case T_START:
+		case T_RP:
+		case T_PLUS:
+		case T_STAR:
+		case T_Q:
+		case T_U:
+		   return prev = T_CAT ;
 
-      case 0:
-	 return 0 ;
-
-      case T_LP:
-	 switch (prev)
-	 {
-	    case T_CHAR:
-	    case T_STR:
-	    case T_ANY:
-	    case T_CLASS:
-	    case T_START:
-	    case T_RP:
-	    case T_PLUS:
-	    case T_STAR:
-	    case T_Q:
-	    case T_U:
-	       return prev = T_CAT ;
-
-	    default:
-	       lp++ ;
-	       return prev = T_LP ;
+	        default:
+	           lp++ ;
+	           return prev = T_LP ;
 	 }
    }
 
    /*  *lp  is	an operand, but implicit cat op is possible   */
-   switch (prev)
-   {
-      case NOT_STARTED:
-      case T_OR:
-      case T_LP:
-      case T_CAT:
+    switch (prev) {
+        case NOT_STARTED:
+        case T_OR:
+        case T_LP:
+        case T_CAT:
+            switch (c) {
+	        case T_ANY:
+		    lp++ ;
+	            *mp = RE_any() ;
+		    return prev = T_ANY ;
 
-	 switch (c)
-	 {
-	    case T_ANY:
-	       {
-		  static plus_is_star_flag = 0 ;
+	        case T_SLASH:
+	            lp++ ;
+	            c = escape(&lp) ;
+	            return prev = do_str(c, &lp, mp) ;
 
-		  if (*++lp == '*')
-		  {
-		     lp++ ;
-		     *mp = RE_u() ;
-		     return prev = T_U ;
-		  }
-		  else if (*lp == '+')
-		  {
-		     if (plus_is_star_flag)
-		     {
-			lp++ ;
-			*mp = RE_u() ;
-			plus_is_star_flag = 0 ;
-			return prev = T_U ;
-		     }
-		     else
-		     {
-			plus_is_star_flag = 1 ;
-			lp-- ;
-			*mp = RE_any() ;
-			return prev = T_ANY ;
-		     }
-		  }
-		  else
-		  {
-		     *mp = RE_any() ;
-		     prev = T_ANY ;
-		  }
-	       }
-	       break ;
+	        case T_CHAR:
+	            c = *lp++ ;
+	            return prev = do_str(c, &lp, mp) ;
 
-	    case T_SLASH:
-	       lp++ ;
-	       c = escape(&lp) ;
-	       prev = do_str(c, &lp, mp) ;
-	       break ;
+	        case T_CLASS:
+	            return prev = do_class(&lp, mp) ;
 
-	    case T_CHAR:
-	       c = *lp++ ;
-	       prev = do_str(c, &lp, mp) ;
-	       break ;
+	       case T_START:
+	            *mp = RE_start() ;
+	            lp++ ;
+	            return prev = T_START ;
+	            break ;
 
-	    case T_CLASS:
-	       prev = do_class(&lp, mp) ;
-	       break ;
+	       case T_END:
+	           lp++ ;
+	           *mp = RE_end() ;
+	           return prev = T_END ;
 
-	    case T_START:
-	       *mp = RE_start() ;
-	       lp++ ;
-	       prev = T_START ;
-	       break ;
+	       default:
+	           RE_panic("bad switch in RE_lex") ;
+	     }
+	     break ;
 
-	    case T_END:
-	       lp++ ;
-	       *mp = RE_end() ;
-	       return prev = T_END ;
-
-	    default:
-	       RE_panic("bad switch in RE_lex") ;
-	 }
-	 break ;
-
-      default:
-	 /* don't advance the pointer */
-	 return prev = T_CAT ;
+        default:
+	    /* don't advance the pointer */
+	    return prev = T_CAT ;
    }
 
-   /* check for end character */
-   if (*lp == '$')
-   {
-      mp->start->type += END_ON ;
-      lp++ ;
-   }
-
-   return prev ;
+   /* not reached */
+   return 0 ;
 }
 
 /*
@@ -251,27 +160,27 @@ reswitch:
 */
 
 static int
-do_str(c, pp, mp)
-   int c ;			 /* the first character */
-   char **pp ;			 /* where to put the re_char pointer on exit */
-   MACHINE *mp ;		 /* where to put the string machine */
+do_str(
+   int c ,			 /* the first character */
+   const char **pp ,			 /* where to put the re_char pointer on exit */
+   MACHINE *mp )		 /* where to put the string machine */
 {
-   register char *p ;		 /* runs thru the input */
-   char *pt ;			 /* trails p by one */
+   register const char *p ;		 /* runs thru the input */
+   const char *pt = 0 ;			 /* trails p by one */
    char *str ;			 /* collect it here */
    register char *s ;		 /* runs thru the output */
-   unsigned len ;		 /* length collected */
+   size_t len ;		 /* length collected */
 
 
    p = *pp ;
-   s = str = RE_malloc(re_len) ;
+   s = str = (char *)RE_malloc(re_end - re_str + 1) ;
    *s++ = c ;  len = 1 ;
 
-   while (1)
+   while (p < re_end)
    {
-      char *save ;   
+      const char *save ;
 
-      switch (char2token(*p))
+      switch (REchar2token[*(const unsigned char*)p])
       {
 	 case T_CHAR:
 	    pt = p ;
@@ -295,7 +204,7 @@ out:
    /* if len > 1 and we stopped on a ? + or * , need to back up */
    if (len > 1 && (*p == '*' || *p == '+' || *p == '?'))
    {
-      len-- ; 
+      len-- ;
       p = pt ;
       s-- ;
    }
@@ -311,32 +220,42 @@ out:
   BUILD A CHARACTER CLASS
  *---------------------------*/
 
-#define	 on( b, x)  ((b)[(x)>>3] |= ( 1 << ((x)&7) ))
+/* turn on bit x in BV b */
+#define	 ON(b,x)  ((b)[(x)>>5] |= ( 1 << ((x)&31) ))
 
-static void PROTO(block_on, (BV, int, int)) ;
-
-static void
-block_on(b, x, y)
-   BV b ;
-   int x, y ;
-   /* caller makes sure x<=y and x>0 y>0 */
+/* turns on bits x..y inclusive */
+static void block_on(BV b, unsigned x, unsigned y)
+   /* caller's resposibilty to  make sure x<=y < 256 */
 {
-   int lo = x >> 3 ;
-   int hi = y >> 3 ;
-   int r_lo = x&7 ;
-   int r_hi = y&7 ;
+    unsigned lo = x >> 5 ;
+    unsigned hi = (y+1) >> 5 ;
+    unsigned r_lo = x&31 ;
+    unsigned r_hi = (y+1)&31 ;
 
-   if (lo == hi)
-   {
-      b[lo] |= (1<<(r_hi+1)) - (1<<r_lo) ;
-   }
-   else
-   {
-      int i ;
-      for (i = lo + 1; i <  hi ; i++)  b[i] = 0xff ;
-      b[lo] |= (0xff << r_lo) ;
-      b[hi] |= ~(0xff << (r_hi+1)) ;
-   }
+#define U32MAX   0xffffffff
+    if (lo == hi) {
+	b[lo] |= ~(U32MAX<<r_hi) & (U32MAX<<r_lo) ;
+    }
+    else {
+	unsigned i ;
+
+	if (hi < 8) {
+	    b[hi] |= ~(U32MAX<<r_hi) ;
+	}
+	b[lo] |=  (U32MAX << r_lo) ;
+
+        for(i = lo+1; i < hi; i++) {
+	    b[i] = U32MAX ;
+        }
+    }
+}
+
+static void BV_or(BV bv1, const BV bv2)
+{
+    unsigned i ;
+    for(i=0; i < 8; i++) {
+        bv1[i] |= bv2[i] ;
+    }
 }
 
 /* build a BV for a character class.
@@ -346,127 +265,171 @@ block_on(b, x, y)
 */
 
 static int
-do_class(start, mp)  char **start ;
-   MACHINE *mp ;
+do_class(const char** start, MACHINE* mp)
 {
-   register char *p ;
-   register BV *bvp ;
-   int prev ;
-   char *q, *t ;
-   int cnt ;
-   int comp_flag ;
+    const char *p ;
+    BV* bvp = 0 ;
+    const BV* cc_bvp = 0 ;
+    int comp_flag = 0 ;
+    const char* t ; /* temp */
 
-   p = t = (*start) + 1 ;
+    p = *start + 1 ;
+    if (p == re_end) {
+        RE_error_trap(-E3) ;
+    }
+    if (*p == '^') {
+        comp_flag = 1 ;
+	p++ ;
+	if (p == re_end) {
+	    RE_error_trap(-E3) ;
+	}
+    }
+    /* [].. and [^].. is ok */
+    if (*p == ']') {
+        if (p+1 == re_end) {
+	    /* [] and [^] alone is not OK */
+	    RE_error_trap(-E3) ;
+	}
+	bvp = (BV *)RE_malloc(sizeof(BV)) ;
+	memset(bvp,0,sizeof(BV)) ;
+	ON(*bvp, ']') ;
+	p++ ;
+    }
+    if (!comp_flag && bvp == 0 && p[0] == '[' && p[1] == ':') {
+	t = p ;
+        cc_bvp = do_named_cc(&t) ;
+	if (*t == ']' && t+1 == re_end) {
+	    /* [[:name:]] */
+            *mp = RE_class(cc_bvp) ;
+	    *start = re_end ;
+	    return T_CLASS ;
+	}
+    }
 
-   /* []...]  puts ] in a class
-      [^]..]  negates a class with ]
-   */
-   if (*p == ']') p++ ;
-   else if (*p == '^' && *(p + 1) == ']')  p += 2 ;
+    if (bvp == 0) {
+        bvp = (BV *)RE_malloc(sizeof(BV)) ;
+	memset(bvp, 0, sizeof(BV)) ;
+	if (cc_bvp) {
+	    BV_or(*bvp, *cc_bvp) ;
+	}
+    }
 
-   while (1)			/* find the back of the class */
-   {
-      if (!(q = strchr(p, ']')))
-      {
-	 /* no closing bracket */
-	 RE_error_trap(-E3) ;
-      }
-      p = q - 1 ;
-      cnt = 0 ;
-      while (*p == '\\')
-      {
-	 cnt++ ; p-- ; 
-      }
-      if ((cnt & 1) == 0)
-      {
-	 /* even number of \ */
-	 break ;
-      }
-      p = q + 1 ;
-   }
+    {
+	int done = 0 ;
+	int have_one = -1 ; /* valid if >= 0 */
+	int have_dash = 0 ; /* boolean 0 or 1, never 1 if have_one == -1
+	                       set if last char was '-'  and have_one >= 0 */
 
-   /*  q  now  pts at the back of the class   */
-   p = t ;
-   *start = q + 1 ;
+	while(!done && p < re_end) {
+	    int c = -1 ;
+	    switch(*p) {
+	        case ']':
+		    if (have_dash) {
+		        ON(*bvp,'-') ;
+			have_dash = 0 ;
+		    }
+		    *start = p+1 ;
+		    done = 1 ;
+		    break ;
 
-   bvp = (BV *) RE_malloc(sizeof(BV)) ;
-   memset(bvp, 0, sizeof(BV)) ;
+		case '[':
+		    if (p[1] == ':') {
+		        if (have_dash) {
+		            ON(*bvp,'-') ;
+			    have_dash = 0 ;
+			}
+			t = p ;
+			cc_bvp = do_named_cc(&t) ;
+			p = t ;
+			BV_or(*bvp, *cc_bvp) ;
+			have_one = -1 ;
+		    }
+		    else {
+		        if (have_dash) {
+			    if (have_one <= '[') {
+			        block_on(*bvp, have_one, '[') ;
+			    }
+			    else {
+			        ON(*bvp,'-') ;
+				ON(*bvp, '[') ;
+			    }
+			    have_one = -1 ;
+			    have_dash = 0 ;
+			}
+			else {
+			    have_one = '[' ;
+			    ON(*bvp, '[') ;
+			}
+			p++ ;
+		    }
+		    break ;
 
-   if (*p == '^')
-   {
-      comp_flag = 1 ; p++ ; 
-   }
-   else	 comp_flag = 0 ;
+		case '-':
+		    if (have_dash) {
+		        if (have_one <= '-') {
+			    block_on(*bvp,have_one,'-') ;
+			    have_dash = 0 ;
+			    have_one = -1 ;
+			}
+			else {
+			    ON(*bvp, '-') ;
+			}
+			have_dash = 0 ;
+			have_one = -1 ;
+		    }
+		    else {
+		        if (have_one >= 0) {
+			    have_dash = 1 ;
+			}
+			else {
+			    ON(*bvp, '-') ;
+			    have_one = '-' ;
+			}
+		    }
+		    p++ ;
+		    break ;
 
-   prev = -1 ;			 /* indicates  -  cannot be part of a range  */
+		case '\\':
+		    t = p+1 ;
+		    c = escape(&t) ;
+		    p = t ;
+		    /* fall thru */
 
-   while (p < q)
-   {
-      switch (*p)
-      {
-	 case '\\':
+		default:
+		    if (c == -1) c = *p++ ;
+		    if (have_dash) {
+		        if (have_one <= c) {
+			    block_on(*bvp, have_one, c) ;
+			}
+			else {
+			    ON(*bvp, '-') ;
+			    ON(*bvp, c) ;
+			}
+			have_one = -1 ;
+			have_dash = 0 ;
+		    }
+		    else {
+		        have_one = c ;
+			ON(*bvp, c) ;
+		    }
+		    /* p has already moved */
+		    break ;
+	    }/*switch*/
+	} /*while*/
 
-	    t = p + 1 ;
-	    prev = escape(&t) ;
-	    on(*bvp, prev) ;
-	    p = t ;
-	    break ;
+	if (! done) {
+           RE_error_trap(-E3) ;
+	}
+    }
 
-	 case '-':
-
-	    if (prev == -1 || p + 1 == q)
-	    {
-	       prev = '-' ;
-	       on(*bvp, '-') ;
-	       p++ ;
-	    }
-	    else
-	    {
-	       int c ;
-	       char *mark = ++p ;
-
-	       if (*p != '\\')	c = *(unsigned char *) p++ ;
-	       else
-	       {
-		  t = p + 1 ;
-		  c = escape(&t) ;
-		  p = t ;
-	       }
-
-	       if (prev <= c)
-	       {
-		  block_on(*bvp, prev, c) ;
-		  prev = -1 ;
-	       }
-	       else  /* back up */
-	       {
-		  p = mark ;
-		  prev = '-' ;
-		  on(*bvp, '-') ;
-	       }
-	    }
-	    break ;
-
-	 default:
-	    prev = *(unsigned char *) p++ ;
-	    on(*bvp, prev) ;
-	    break ;
-      }
-   }
-
-   if (comp_flag)
-   {
-      for (p = (char *) bvp; p < (char *) bvp + sizeof(BV); p++)
-      {
-	 *p = ~*p ;
-      }
-   }
-
-   /* make sure zero is off */
-   (*bvp)[0] &= ~1 ;
-
-   *mp = RE_class(store_bvp(bvp)) ;
-   return T_CLASS ;
+    if (comp_flag) {
+        unsigned i ;
+        for(i=0; i < 8; i++) {
+            (*bvp)[i] = ~(*bvp)[i] ;
+	}
+    }
+    *mp = RE_class((const BV*) bvp) ;
+    return T_CLASS ;
 }
 
 
@@ -477,9 +440,11 @@ do_class(start, mp)  char **start ;
 
 #define		BV_GROWTH	6
 
+/* unlikely this saves anything so stub out  */
+
+#if 0
 static BV *
-store_bvp(bvp)
-   BV *bvp ;
+store_bvp(BV* bvp)
 {
    static BV **bv_base, **bv_limit ;
    static BV **bv_next ;	 /* next empty slot in the array */
@@ -525,6 +490,7 @@ store_bvp(bvp)
 
    return *p ;
 }
+#endif
 
 
 /* ----------	convert escape sequences  -------------*/
@@ -542,8 +508,7 @@ static char hex_val['f' - 'A' + 1] =
 
 /* interpret 1 character as hex */
 static int
-ctohex(c)
-   register int c ;
+ctohex(register int c)
 {
    int t ;
 
@@ -560,14 +525,14 @@ static struct
 }
 escape_test[ET_END + 1] =
 {
-   'n', '\n',
-   't', '\t',
-   'f', '\f',
-   'b', '\b',
-   'r', '\r',
-   'a', '\07',
-   'v', '\013',
-   0, 0
+   { 'n', '\n' },
+   { 't', '\t' },
+   { 'f', '\f' },
+   { 'b', '\b' },
+   { 'r', '\r' },
+   { 'a', '\07' },
+   { 'v', '\013' },
+   {0, 0}
 } ;
 
 
@@ -578,10 +543,9 @@ escape_test[ET_END + 1] =
  *-------------------*/
 
 static int
-escape(start_p)
-   char **start_p ;
+escape(const char** start_p)
 {
-   register char *p = *start_p ;
+   register const char *p = *start_p ;
    register unsigned x ;
    unsigned xx ;
    int i ;
@@ -615,13 +579,13 @@ escape(start_p)
    {
       if ((x = ctohex(*p)) == NOT_HEX)
       {
-	 *start_p  = p ;  return 'x' ; 
+	 *start_p  = p ;  return 'x' ;
       }
 
       /* look for another hex digit */
       if ((xx = ctohex(*++p)) != NOT_HEX)
       {
-	 x = (x<<4) + xx ; p++ ; 
+	 x = (x<<4) + xx ; p++ ;
       }
 
       *start_p = p ; return x ;
@@ -629,6 +593,122 @@ escape(start_p)
 
    /* anything else \c -> c */
    *start_p = p ;
-   return *(unsigned char *) (p - 1) ;
+   return (int)(*(const unsigned char *) (p - 1)) ;
 }
+
+/* named character class  */
+
+#include <ctype.h>
+
+#if !defined(isblank)			/* check for nonstandard macro */
+
+#define isblank isblank_		/* hide from C++ declaration conflict */
+
+int
+isblank(int c)
+{
+    return ((c == ' ') || (c == '\t'));	/* Sun Solaris 10 results */
+}
+
+#endif
+
+/* if this table ever changes, make sure it is SORTED on name */
+
+static struct cc_table {
+    const char* name ;
+    int (* const tester)(int) ;
+    const BV* bvp ;
+} the_cc_table[] = {
+    { "alnum", isalnum,  0},
+    { "alpha", isalpha,  0},
+    { "blank", isblank,  0},
+    { "cntrl", iscntrl,  0},
+    { "digit", isdigit,  0},
+    { "graph", isgraph,  0},
+    { "lower", islower,  0},
+    { "print", isprint,  0},
+    { "punct", ispunct,  0},
+    { "space", isspace,  0},
+    { "upper", isupper,  0},
+    { "xdigit", isxdigit,  0}
+} ;
+
+#define NAME_LEN    6  /* length of longest name in table */
+
+#if defined(__cplusplus)
+#define try try_
+#endif
+
+/* binary search of the_cc_table */
+static const BV* lookup_cclass(const char* name)
+{
+    typedef struct cc_table CC ;
+    CC* left = the_cc_table ;
+    CC* right = the_cc_table + sizeof(the_cc_table)/sizeof(CC) ;
+    while(left < right) {
+        CC* try = left + (right-left)/2 ;
+	int k = strcmp(name, try->name) ;
+	if (k < 0) right = try ;
+	else if (k > 0) left = try+1 ;
+	/* found */
+	else if (try->bvp) {
+	    return try->bvp ;
+	}
+	else {
+	    unsigned c ;
+	    int (*tester)(int) = try->tester ;
+	    BV* bvp = (BV *)RE_malloc(sizeof(BV)) ;
+	    try->bvp = (const BV*) bvp ;
+	    memset(bvp, 0, sizeof(BV)) ;
+	    for(c = 0; c < 256; c++) {
+	        if (tester(c)) {
+		    ON(*bvp,c) ;
+		}
+	    }
+	    return (const BV*) bvp ;
+	}
+    }
+    /* not found */
+    return 0 ;
+}
+
+/* extracts name in [:name:] and then calls lookup_cclass() */
+static const BV* do_named_cc(const char** start)
+{
+    char name[NAME_LEN+1] ;
+    const char* p = *start ;
+    unsigned cnt = 0 ;
+    char* n = name ;
+    p += 2 ;   /* move past [: */
+
+    while(p < re_end && cnt <= NAME_LEN) {
+        if (*p == ':') {
+	    if (p[1] != ']') {
+	       /* badly formed class */
+	       *start = p ;
+               RE_error_trap(-E6) ;
+	    }
+	    *n = 0 ;
+	    *start = p+2 ;
+	    {
+	        const BV* ret = lookup_cclass(name) ;
+		if (ret == 0) {
+		    RE_error_trap(-E6) ;
+		}
+		return ret ;
+	    }
+	}
+	else {
+	    *n++ = *p++ ;
+	    cnt++ ;
+	}
+    }
+    /* badly formed class */
+    *start = p ;
+    RE_error_trap(-E6) ;
+    /* not reached */
+    return 0 ;
+}
+
+
 

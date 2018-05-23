@@ -1,8 +1,8 @@
 
-#$Id: packing.list,v 1.17 1996/09/18 00:40:21 mike Exp $
+#$Id: packing.list,v 1.7 2016/07/28 21:28:40 mike Exp $
 
 ################################################
-# These files form the mawk distribution 1.3
+# These files form the beta mawk distribution 1.9.9.x
 #
 # Mawk is an implementation of the AWK Programming Language as
 # defined and described in Aho, Kernighan and Weinberger, The
@@ -11,27 +11,19 @@
 #
 ################################################
 packing.list		this file
-README			description of mawk 1.3
+README			description of mawk 1.9.9.x
 INSTALL			installation instructions
-COPYING			GNU General Public License, version 2	
-ACKNOWLEDGMENT
-CHANGES
-Makefile.in		makefile template
-configure		Configuration script
-config.user		user settable configuration parameters
-configure.in		autoconf script
-mawk.ac.m4		ditto
+CONTACT                 Mike Brennan <mawkeddy@gmail.com>
+REPOSITORY              google drive download site for mawk
+Makefile.in
+configure
+configure.ac
+config.hin
+THANKS
+ChangeLog.beebe
 #################################
-# directory: config-user    hints on CFLAGS and odd configurations
-config-user/.config.user    readonly copy of template
-config-user/apollo
-config-user/convex
-config-user/mips
-config-user/sgi
-config-user/ultrix-mips
-config-user/cray
-######################
-bi_funct.c		source files
+array.c             source files
+bi_funct.c
 bi_vars.c
 cast.c
 code.c
@@ -44,20 +36,22 @@ files.c
 fin.c
 hash.c
 init.c
+int.c
 jmp.c
 kw.c
 main.c
 makescan.c
-matherr.c
 memory.c
-missing.c
+parse.c
 print.c
+printf.c
 re_cmpl.c
 scan.c
 scancode.c
 split.c
 version.c
 zmalloc.c
+array.h
 bi_funct.h
 bi_vars.h
 code.h
@@ -65,26 +59,23 @@ field.h
 files.h
 fin.h
 init.h
+int.h
 jmp.h
 mawk.h
 memory.h
-nstd.h
-patchlev.h
+parse.h
+printf.h
 regexp.h
 repl.h
 scan.h
 sizes.h
+split.h
 symtype.h
 types.h
-vargs.h
 zmalloc.h
-parse.y
-parse.c
-parse.h
 array.w
-array.c
-array.h
-fpe_check.c
+printf.w
+parse.y
 ########################
 # directory:  man
 man/mawk.1		troff source for unix style man pages
@@ -99,17 +90,13 @@ rexp/rexp1.c
 rexp/rexp2.c
 rexp/rexp3.c
 rexp/rexpdb.c
+rexp/wait.c
+rexp/wait.h
 #######################
 # directory:  test      testing and benchmarking directory
 test/mawktest           scripts to test mawk compiled OK
-test/mawktest.v7
-test/mawktest.bat       DOS
-test/mawktest.g		atarist
 test/mawktest.dat       input data for the test
 test/fpe_test		scripts to test if fpe handling compiled OK
-test/fpe_test.v7
-test/fpe_test.bat
-test/fpe_test.g
 test/wc.awk		awk programs used by the tests
 test/reg0.awk
 test/reg1.awk
@@ -122,6 +109,10 @@ test/fpetest3.awk
 test/reg-awk.out
 test/wc-awk.out
 test/wfrq-awk.out
+test/pipetest
+test/pipetest.out
+test/okay/mawktest.out
+test/okay/mawktest.err
 ######################
 # directory:  examples       useful awk programs
 examples/hical			calendar program by Bob Stockler
@@ -134,38 +125,14 @@ examples/eatc.awk
 examples/primes.awk
 examples/qsort.awk
 examples/ct_length.awk		change length to length()
-######################
-# directory  msdos
-msdos/NOTES
-msdos/INSTALL			installation instructions for DOS
-msdos/dosexec.c			system() and pipes() for DOS
-msdos/argvpoly.c		for polyshell
-msdos/argvmks.c			for MKS Korn Shell
-msdos/makefile.tcc		for [TB]CC and Borland make
-msdos/makefile.msc		nmake and MSC 6.0A
-msdos/makefile.ztc	        
-msdos/mawk.def
-msdos/tcc.h
-msdos/msc.h
-msdos/ztc.h
-#####################
-# directory msdos/examples	awk programs for msdos
-msdos/examples/add_cr.awk
-msdos/examples/doslist.awk
-msdos/examples/objstat.awk
-msdos/examples/shell.awk
-msdos/examples/srcstat.awk
-msdos/examples/srcstat2.awk
-msdos/examples/texttest.awk
-msdos/examples/winexe.awk
-msdos/examples/winobj.awk
-#####################
-# directory atarist
-atarist/README.ST
-####################
-# directory v7
-v7/Makefile.v7
-v7/README
-v7/V7.h
-v7/V7_notes
-v7/config.h
+#################################
+# directory cdoc    read about the code
+cdoc/array.pdf
+cdoc/printf.pdf
+cdoc/array.dvi
+cdoc/printf.dvi
+cdoc/Makefile
+###############################
+# directory old   nostalgia
+old/ACKNOWLEDGMENT
+old/CHANGES

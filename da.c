@@ -1,54 +1,20 @@
 
 /********************************************
 da.c
-copyright 1991, Michael D. Brennan
+copyright 1991, 2014-16 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
 
-/* $Log: da.c,v $
- * Revision 1.6  1995/06/18  19:19:59  mike
- * remove use of comma operator that broke some sysVr3 compilers
- *
- * Revision 1.5  1994/12/13  00:12:08  mike
- * delete A statement to delete all of A at once
- *
- * Revision 1.4  1994/10/08  19:15:32  mike
- * remove SM_DOS
- *
- * Revision 1.3  1993/12/01  14:25:10  mike
- * reentrant array loops
- *
- * Revision 1.2  1993/07/22  00:04:05  mike
- * new op code _LJZ _LJNZ
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:10  mike
- * move source to cvs
- *
- * Revision 5.4	 1993/01/09  19:05:48  mike
- * dump code to stdout and exit(0)
- *
- * Revision 5.3	 1993/01/07  02:50:33  mike
- * relative vs absolute code
- *
- * Revision 5.2	 1992/07/25  21:35:25  brennan
- * patch2
- * fixed small typo on da of _PRE_DEC
- *
- * Revision 5.1	 1991/12/05  07:55:45  brennan
- * 1.1 pre-release
- *
-*/
-
-
-/*  da.c  */
 /*  disassemble code */
-
 
 
 #include  "mawk.h"
@@ -58,94 +24,126 @@ the GNU General Public License, version 2, 1991.
 #include  "bi_funct.h"
 #include  "repl.h"
 #include  "field.h"
+#include  "printf.h"
 
-static char *PROTO(find_bi_name, (PF_CP)) ;
+static const char* find_bi_name(PF_CP) ;
 
-static struct sc
+static const struct sc
 {
-   char op ; 
-   char *name ;
+   char op ;
+   const char *name ;
 } simple_code[] =
 
 {
-   _STOP, "stop",
-   FE_PUSHA, "fe_pusha",
-   FE_PUSHI, "fe_pushi",
-   A_TEST, "a_test",
-   A_DEL, "a_del",
-   DEL_A, "del_a",
-   POP_AL, "pop_al",
-   _POP, "pop",
-   _ADD, "add",
-   _SUB, "sub",
-   _MUL, "mul",
-   _DIV, "div",
-   _MOD, "mod",
-   _POW, "pow",
-   _NOT, "not",
-   _UMINUS, "uminus",
-   _UPLUS, "uplus",
-   _TEST, "test",
-   _CAT, "cat",
-   _ASSIGN, "assign",
-   _ADD_ASG, "add_asg",
-   _SUB_ASG, "sub_asg",
-   _MUL_ASG, "mul_asg",
-   _DIV_ASG, "div_asg",
-   _MOD_ASG, "mod_asg",
-   _POW_ASG, "pow_asg",
-   NF_PUSHI, "nf_pushi",
-   F_ASSIGN, "f_assign",
-   F_ADD_ASG, "f_add_asg",
-   F_SUB_ASG, "f_sub_asg",
-   F_MUL_ASG, "f_mul_asg",
-   F_DIV_ASG, "f_div_asg",
-   F_MOD_ASG, "f_mod_asg",
-   F_POW_ASG, "f_pow_asg",
-   _POST_INC, "post_inc",
-   _POST_DEC, "post_dec",
-   _PRE_INC, "pre_inc",
-   _PRE_DEC, "pre_dec",
-   F_POST_INC, "f_post_inc",
-   F_POST_DEC, "f_post_dec",
-   F_PRE_INC, "f_pre_inc",
-   F_PRE_DEC, "f_pre_dec",
-   _EQ, "eq",
-   _NEQ, "neq",
-   _LT, "lt",
-   _LTE, "lte",
-   _GT, "gt",
-   _GTE, "gte",
-   _MATCH2, "match2",
-   _EXIT, "exit",
-   _EXIT0, "exit0",
-   _NEXT, "next",
-   _RET, "ret",
-   _RET0, "ret0",
-   _OMAIN, "omain",
-   _JMAIN, "jmain",
-   OL_GL, "ol_gl",
-   OL_GL_NR, "ol_gl_nr",
-   _HALT, (char *) 0
+    { _STOP, "stop" } ,
+    { FE_PUSHA, "fe_pusha" } ,
+    { FE_PUSHI, "fe_pushi" } ,
+    { A_TEST, "a_test" } ,
+    { A_DEL, "a_del" } ,
+    { DEL_A, "del_a" } ,
+    { POP_AL, "pop_al" } ,
+    { _POP, "pop" } ,
+    { _ADD, "add" } ,
+    { _SUB, "sub" } ,
+    { _MUL, "mul" } ,
+    { _DIV, "div" } ,
+    { _MOD, "mod" } ,
+    { _POW, "pow" } ,
+    { _NOT, "not" } ,
+    { _UMINUS, "uminus" } ,
+    { _UPLUS, "uplus" } ,
+    { _TEST, "test" } ,
+    { _CAT, "cat" } ,
+    { _ASSIGN, "assign" } ,
+    { _ADD_ASG, "add_asg" } ,
+    { _SUB_ASG, "sub_asg" } ,
+    { _MUL_ASG, "mul_asg" } ,
+    { _DIV_ASG, "div_asg" } ,
+    { _MOD_ASG, "mod_asg" } ,
+    { _POW_ASG, "pow_asg" } ,
+    { NF_PUSHI, "nf_pushi" } ,
+    { F_ASSIGN, "f_assign" } ,
+    { F_ADD_ASG, "f_add_asg" } ,
+    { F_SUB_ASG, "f_sub_asg" } ,
+    { F_MUL_ASG, "f_mul_asg" } ,
+    { F_DIV_ASG, "f_div_asg" } ,
+    { F_MOD_ASG, "f_mod_asg" } ,
+    { F_POW_ASG, "f_pow_asg" } ,
+    { _POST_INC, "post_inc" } ,
+    { _POST_DEC, "post_dec" } ,
+    { _PRE_INC, "pre_inc" } ,
+    { _PRE_DEC, "pre_dec" } ,
+    { F_POST_INC, "f_post_inc" } ,
+    { F_POST_DEC, "f_post_dec" } ,
+    { F_PRE_INC, "f_pre_inc" } ,
+    { F_PRE_DEC, "f_pre_dec" } ,
+    { _EQ, "eq" } ,
+    { _NEQ, "neq" } ,
+    { _LT, "lt" } ,
+    { _LTE, "lte" } ,
+    { _GT, "gt" } ,
+    { _GTE, "gte" } ,
+    { _MATCH2, "match2" } ,
+    { _EXIT, "exit" } ,
+    { _EXIT0, "exit0" } ,
+    { _NEXT, "next" } ,
+    { _NEXTFILE, "nextfile" } ,
+    { _RET, "ret" } ,
+    { _RET0, "ret0" } ,
+    { _OMAIN, "omain" } ,
+    { _JMAIN, "jmain" } ,
+    { OL_GL, "ol_gl" } ,
+    { OL_GL_NR, "ol_gl_nr" } ,
+    { _HALT, 0 }
 } ;
 
-static char *jfmt = "%s%s%03d\n" ; 
+
+/* write a visible string to fp, enclose in ec (will be / /  or " "  */
+
+void visible_string(FILE* fp, const STRING* sval, int ec)
+{
+    const char* s = sval->str ;
+    const char* const s_end = s + sval->len ;
+
+    fputc(ec,fp) ;
+    while(s < s_end) {
+	int c = *s++ ;
+
+	if (c == ec) {
+	    fprintf(fp, "\\%c", ec) ;
+	}
+	else if (c == '\\') {
+	    fprintf(fp, "\\\\") ;
+	}
+	else if (c == '\n') {
+	    fputs("\\n", fp) ;
+	}
+	else if(c >= 32 && c < 127) {
+	    fputc(c,fp) ;
+	}
+	else {
+	    fprintf(fp, "\\x%02x", c) ;
+	}
+    }
+    fputc(ec,fp) ;
+}
+
+
+static const char *jfmt = "%s%s%03d\n" ;
    /* format to print jumps */
-static char *tab2 = "\t\t" ;
+static const char *tab2 = "\t\t" ;
 
 void
-da(start, fp)
-   INST *start ;
-   FILE *fp ;
+da(INST* start, FILE* fp)
 {
    CELL *cp ;
    register INST *p = start ;
-   char *name ;
+   const char *name ;
 
    while (p->op != _HALT)
    {
       /* print the relative code address (label) */
-      fprintf(fp, "%03d ", p - start) ;
+      fprintf(fp, "%03ld ", (long)(p - start)) ;
 
       switch (p++->op)
       {
@@ -155,8 +153,12 @@ da(start, fp)
 	    switch (cp->type)
 	    {
 	       case C_RE:
-		  fprintf(fp, "pushc\t0x%lx\t/%s/\n", (long) cp->ptr,
-			  re_uncompile(cp->ptr)) ;
+	           {
+		       const STRING* sval = re_uncompile(cp->ptr) ;
+		       fprintf(fp, "pushc\t0x%lx\t", (long) cp->ptr) ;
+		       visible_string(fp,sval,'/') ;
+		       fputc('\n',fp) ;
+		    }
 		  break ;
 
 	       case C_SPACE:
@@ -167,12 +169,20 @@ da(start, fp)
 		  fprintf(fp, "pushc\tnull split\n") ;
 		  break ;
 	       case C_REPL:
-		  fprintf(fp, "pushc\trepl\t%s\n",
-			  repl_uncompile(cp)) ;
+	          {
+		      const STRING* sval = repl_unscan(cp) ;
+		      fprintf(fp, "pushc\trepl\t") ;
+		      visible_string(fp, sval, '"') ;
+		      fputc('\n', fp) ;
+		  }
 		  break ;
 	       case C_REPLV:
-		  fprintf(fp, "pushc\treplv\t%s\n",
-			  repl_uncompile(cp)) ;
+	          {
+		      const STRING* sval = repl_unscan(cp) ;
+		      fprintf(fp, "pushc\treplv\t") ;
+		      visible_string(fp, sval, '"') ;
+		      fputc('\n', fp) ;
+		  }
 		  break ;
 
 	       default:
@@ -187,15 +197,29 @@ da(start, fp)
 	 case _PUSHS:
 	    {
 	       STRING *sval = (STRING *) p++->ptr ;
-	       fprintf(fp, "pushs\t\"%s\"\n", sval->str) ;
+	       fprintf(fp, "pushs\t") ;
+	       visible_string(fp,sval,'"') ;
+	       fputc('\n',fp) ;
+	       break ;
+	    }
+	 case PUSHFM:
+	    {
+	       const Form* form = (const Form*)(p++->ptr) ;
+	       fprintf(fp, "pushfm\t") ;
+	       da_Form(fp, form) ;
+	       fputc('\n',fp) ;
 	       break ;
 	    }
 
 	 case _MATCH0:
 	 case _MATCH1:
-	    fprintf(fp, "match%d\t0x%lx\t/%s/\n",
-		    p[-1].op == _MATCH1, (long) p->ptr,
-		    re_uncompile(p->ptr)) ;
+	    {
+	        const STRING* sval = re_uncompile(p->ptr) ;
+	        fprintf(fp, "match%d\t0x%lx\t",
+		    p[-1].op == _MATCH1, (long) p->ptr) ;
+		visible_string(fp, sval, '/') ;
+		fputc('\n', fp) ;
+	    }
 	    p++ ;
 	    break ;
 
@@ -211,12 +235,9 @@ da(start, fp)
 	       fprintf(fp, "pushi\t@fs_shadow\n") ;
 	    else
 	    {
-	       if (
-#ifdef  MSDOS
-		     SAMESEG(cp, field) &&
-#endif
-		     cp > NF && cp <= LAST_PFIELD)
+	       if (cp > NF && cp <= LAST_PFIELD) {
 		  name = reverse_find(ST_FIELD, &cp) ;
+	       }
 	       else  name = reverse_find(ST_VAR, &cp) ;
 
 	       fprintf(fp, "pushi\t%s\n", name) ;
@@ -245,13 +266,10 @@ da(start, fp)
 
 	 case F_PUSHA:
 	    cp = (CELL *) p++->ptr ;
-	    if (
-#ifdef  MSDOS
-		  SAMESEG(cp, field) &&
-#endif
-		  cp >= NF && cp <= LAST_PFIELD)
+	    if (cp >= NF && cp <= LAST_PFIELD) {
 	       fprintf(fp, "f_pusha\t%s\n",
 		       reverse_find(ST_FIELD, &cp)) ;
+	    }
 	    else  fprintf(fp, "f_pusha\t$%d\n",
 		       field_addr_to_index(cp)) ;
 	    break ;
@@ -276,6 +294,49 @@ da(start, fp)
 		    reverse_find(ST_ARRAY, &p++->ptr)) ;
 	    break ;
 
+	 case PI_LOAD:
+	     {
+	         SYMTAB* stp = (SYMTAB*) p++->ptr ;
+		 switch(stp->type) {
+		     case ST_VAR:
+		         fprintf(fp, "pushi/pi_load\t%s\n", stp->name) ;
+			 break ;
+		     case ST_ARRAY:
+		         fprintf(fp, "a_pusha/pi_load\t%s\n", stp->name) ;
+			 p[1].ptr = (PTR)bi_alength ;
+			 break ;
+		     default:
+		         fprintf(fp, "pushi/pi_load\t%s\n", "@unused") ;
+			 break ;
+		 }
+	     }
+	     break ;
+
+	 case LPI_LOAD:
+	     {
+	         Local_PI* pi = (Local_PI*) p++->ptr ;
+		 FBLOCK* fbp = pi->fbp ;
+		 unsigned offset = pi->offset ;
+		 int type = fbp->typev[offset] ;
+		 switch(type) {
+		     case ST_LOCAL_VAR:
+		         fprintf(fp, "lpushi/lpi_load\t%s %u\n",
+			             fbp->name, offset) ;
+			 break ;
+		     case ST_LOCAL_ARRAY:
+		         fprintf(fp, "la_pusha/lpi_load\t%s %u\n",
+			             fbp->name, offset) ;
+			 p[1].ptr = (PTR)bi_alength ;
+			 break ;
+		     case ST_LOCAL_NONE:
+		         fprintf(fp, "pushi/lpi_load\t%s\n", "@unused") ;
+			 break ;
+		     default:
+		         bozo("da LPI_LOAD") ;
+			 break ;
+		 }
+	     }
+	     break ;
 	 case _PUSHINT:
 	    fprintf(fp, "pushint\t%d\n", p++->op) ;
 	    break ;
@@ -286,10 +347,18 @@ da(start, fp)
 	    break ;
 
 	 case _PRINT:
-	    fprintf(fp, "%s\n",
-		    (PF_CP) p++->ptr == bi_printf
-		    ? "printf" : "print") ;
-	    break ;
+	     {
+	         const char* name_ = "print" ;
+		 PF_CP printer = (PF_CP) p++->ptr ;
+		 if (printer == bi_printf) {
+		     name_ = "printf" ;
+		 }
+		 else if (printer == bi_printf1) {
+		     name_ = "printf1" ;
+		 }
+	         fprintf(fp, "%s\n", name_) ;
+	     }
+	     break ;
 
 	 case _JMP:
 	    fprintf(fp, jfmt, "jmp", tab2, (p - start) + p->op) ;
@@ -317,12 +386,12 @@ da(start, fp)
 	    break ;
 
 	 case SET_ALOOP:
-	    fprintf(fp, "set_al\t%03d\n", p + p->op - start) ;
+	    fprintf(fp, "set_al\t%03ld\n", (long)(p + p->op - start)) ;
 	    p++ ;
 	    break ;
 
 	 case ALOOP:
-	    fprintf(fp, "aloop\t%03d\n", p - start + p->op) ;
+	    fprintf(fp, "aloop\t%03ld\n", (long)(p - start + p->op)) ;
 	    p++ ;
 	    break ;
 
@@ -337,16 +406,17 @@ da(start, fp)
 	    break ;
 
 	 case _RANGE:
-	    fprintf(fp, "range\t%03d %03d %03d\n",
+	    fprintf(fp, "range\t%03ld %03ld %03ld\n",
 	    /* label for pat2, action, follow */
-		    p - start + p[1].op,
-		    p - start + p[2].op,
-		    p - start + p[3].op) ;
+		    (long)(p - start + p[1].op),
+		    (long)(p - start + p[2].op),
+		    (long)(p - start + p[3].op)) ;
 	    p += 4 ;
 	    break ;
+
 	 default:
 	    {
-	       struct sc *q = simple_code ;
+	       const struct sc *q = simple_code ;
 	       int k = (p - 1)->op ;
 
 	       while (q->op != _HALT && q->op != k)  q++ ;
@@ -360,24 +430,27 @@ da(start, fp)
    fflush(fp) ;
 }
 
-static struct
+static const struct
 {
    PF_CP action ;
-   char *name ;
+   const char *name ;
 }
 special_cases[] =
 {
-   bi_split, "split",
-   bi_match, "match",
-   bi_getline, "getline",
-   bi_sub, "sub",
-   bi_gsub, "gsub",
-   (PF_CP) 0, (char *) 0
+    { bi_split, "split" } ,
+    { bi_length, "length"} ,
+    { bi_alength, "alength"} ,
+    { bi_match, "match" } ,
+    { bi_getline, "getline" } ,
+    { bi_sub, "sub" } ,
+    { bi_gsub, "gsub" } ,
+    { bi_sprintf, "sprintf" } ,
+    { bi_sprintf1, "sprintf1" } ,
+    {0,0}
 } ;
 
-static char *
-find_bi_name(p)
-   PF_CP p ;
+static const char *
+find_bi_name(PF_CP p)
 {
    BI_REC *q ;
    int i ;
@@ -391,12 +464,13 @@ find_bi_name(p)
       }
    }
    /* next check some special cases */
-   for (i = 0; special_cases[i].action; i++)
-   {
-      if (special_cases[i].action == p)	 return special_cases[i].name ;
-   }
+    for (i = 0; special_cases[i].action != 0; i++) {
+        if (special_cases[i].action == p) {
+            return special_cases[i].name ;
+	}
+    }
 
-   return "unknown builtin" ;
+    return "unknown builtin" ;
 }
 
 static struct fdump
@@ -406,8 +480,7 @@ static struct fdump
 } *fdump_list ;			 /* linked list of all user functions */
 
 void
-add_to_fdump_list(fbp)
-   FBLOCK *fbp ;
+add_to_fdump_list(FBLOCK *fbp)
 {
    struct fdump *p = ZMALLOC(struct fdump) ;
    p->fbp = fbp ;
@@ -415,7 +488,7 @@ add_to_fdump_list(fbp)
 }
 
 void
-fdump()
+fdump(void)
 {
    register struct fdump *p, *q = fdump_list ;
 

@@ -1,137 +1,109 @@
 
 /********************************************
 bi_funct.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/* $Log: bi_funct.c,v $
- * Revision 1.9  1996/01/14  17:16:11  mike
- * flush_all_output() before system()
- *
- * Revision 1.8  1995/08/27  18:13:03  mike
- * fix random number generator to work with longs larger than 32bits
- *
- * Revision 1.7  1995/06/09  22:53:30  mike
- * change a memcmp() to strncmp() to make purify happy
- *
- * Revision 1.6  1994/12/13  00:26:32  mike
- * rt_nr and rt_fnr for run-time error messages
- *
- * Revision 1.5  1994/12/11  22:14:11  mike
- * remove THINK_C #defines.  Not a political statement, just no indication
- * that anyone ever used it.
- *
- * Revision 1.4  1994/12/10  21:44:12  mike
- * fflush builtin
- *
- * Revision 1.3  1993/07/14  11:46:36  mike
- * code cleanup
- *
- * Revision 1.2	 1993/07/14  01:22:27  mike
- * rm SIZE_T
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:08  mike
- * move source to cvs
- *
- * Revision 5.5	 1993/02/13  21:57:18  mike
- * merge patch3
- *
- * Revision 5.4	 1993/01/01  21:30:48  mike
- * split new_STRING() into new_STRING and new_STRING0
- *
- * Revision 5.3.1.2  1993/01/27	 01:04:06  mike
- * minor tuning to str_str()
- *
- * Revision 5.3.1.1  1993/01/15	 03:33:35  mike
- * patch3: safer double to int conversion
- *
- * Revision 5.3	 1992/12/17  02:48:01  mike
- * 1.1.2d changes for DOS
- *
- * Revision 5.2	 1992/07/08  15:43:41  brennan
- * patch2: length returns.  I am a wimp
- *
- * Revision 5.1	 1991/12/05  07:55:35  brennan
- * 1.1 pre-release
- *
-*/
-
+#include "config.h"	/* needed to resolve intersystem conflicts on C and C++ declarations of random() and srandom() */
 
 #include "mawk.h"
 #include "bi_funct.h"
 #include "bi_vars.h"
 #include "memory.h"
 #include "init.h"
+#include "int.h"
 #include "files.h"
 #include "fin.h"
 #include "field.h"
 #include "regexp.h"
 #include "repl.h"
 #include <math.h>
+#include <time.h>
+#include <sys/time.h>
 
+#if defined(__cplusplus)
+#define THROW__ throw()
+#else
+#define THROW__
+#endif
 
-/* statics */
-static STRING *PROTO(gsub, (PTR, CELL *, char *, int)) ;
-static void PROTO(fplib_err, (char *, double, char *)) ;
+#if !HAVE_DECL_RANDOM
+extern long int random (void) THROW__;
+#endif
 
+#if !HAVE_DECL_SRANDOM
+extern void srandom (unsigned int __seed) THROW__;
+#endif
 
 /* global for the disassembler */
-BI_REC bi_funct[] =
-{				/* info to load builtins */
+BI_REC bi_funct[] =  {  /* info to load builtins */
+   { "index", bi_index, 2, 2 },
+   { "substr", bi_substr, 2, 3 },
+   { "sin", bi_sin, 1, 1 },
+   { "cos", bi_cos, 1, 1 },
+   { "atan2", bi_atan2, 2, 2 },
+   { "exp", bi_exp, 1, 1 },
+   { "log", bi_log, 1, 1 },
+   { "int", bi_int, 1, 1 },
+   { "sqrt", bi_sqrt, 1, 1 },
+   { "rand", bi_rand, 0, 0 },
+   { "srand", bi_srand, 0, 1 },
+   { "close", bi_close, 1, 1 },
+   { "system", bi_system, 1, 1 },
+   { "toupper", bi_toupper, 1, 1 },
+   { "tolower", bi_tolower, 1, 1 },
+   { "fflush", bi_fflush, 0, 1 },
+   {0,0,0,0}
+} ;
 
-   "length", bi_length, 0, 1,	/* special must come first */
-   "index", bi_index, 2, 2,
-   "substr", bi_substr, 2, 3,
-   "sprintf", bi_sprintf, 1, 255,
-   "sin", bi_sin, 1, 1,
-   "cos", bi_cos, 1, 1,
-   "atan2", bi_atan2, 2, 2,
-   "exp", bi_exp, 1, 1,
-   "log", bi_log, 1, 1,
-   "int", bi_int, 1, 1,
-   "sqrt", bi_sqrt, 1, 1,
-   "rand", bi_rand, 0, 0,
-   "srand", bi_srand, 0, 1,
-   "close", bi_close, 1, 1,
-   "system", bi_system, 1, 1,
-   "toupper", bi_toupper, 1, 1,
-   "tolower", bi_tolower, 1, 1,
-   "fflush", bi_fflush, 0, 1,
+double
+infty_(void)
+{
+    volatile double x;
+    x = 0.0;
+    return ( 1.0 / x );
+}
 
-   (char *) 0, (PF_CP) 0, 0, 0} ;
-
+double
+nan_(const char *payload)
+{
+    volatile double x, y;
+    x = y = 0.0;
+    return ( y / x );
+}
 
 /* load built-in functions in symbol table */
 void
-bi_funct_init()
+bi_funct_init(void)
 {
    register BI_REC *p ;
    register SYMTAB *stp ;
 
-   /* length is special (posix bozo) */
-   stp = insert(bi_funct->name) ;
-   stp->type = ST_LENGTH ;
-   stp->stval.bip = bi_funct ;
-
-   for (p = bi_funct + 1; p->name; p++)
+   for (p = bi_funct ; p->name; p++)
    {
       stp = insert(p->name) ;
       stp->type = ST_BUILTIN ;
       stp->stval.bip = p ;
    }
 
+/*#if 0*/ /*   zombie lock-step */
+#if 1   /* NO zombie lock-step */
    /* seed rand() off the clock */
    {
       CELL c ;
-
-      c.type = 0 ;  bi_srand(&c) ;
+      c.type = 0 ;
+      bi_srand(&c) ;
    }
+#endif
 
 }
 
@@ -140,13 +112,9 @@ bi_funct_init()
  **************************************************/
 
 CELL *
-bi_length(sp)
-   register CELL *sp ;
+bi_length(CELL* sp)
 {
-   unsigned len ;
-
-   if (sp->type == 0)  cellcpy(sp, field) ;
-   else	 sp-- ;
+   size_t len ;
 
    if (sp->type < C_STRING)  cast1_to_s(sp) ;
    len = string(sp)->len ;
@@ -158,58 +126,72 @@ bi_length(sp)
    return sp ;
 }
 
-char *
-str_str(target, key, key_len)
-   register char *target ;
-   char *key ;
-   unsigned key_len ;
+/* length (size) of an array */
+CELL*
+bi_alength(CELL* sp)
 {
-   register int k = key[0] ;
-
-   switch (key_len)
-   {
-      case 0:
-	 return (char *) 0 ;
-      case 1:
-	 return strchr(target, k) ;
-      case 2:
-	 {
-	    int k1 = key[1] ;
-	    while (target = strchr(target, k))
-	       if (target[1] == k1)  return target ;
-	       else  target++ ;
-	    /*failed*/
-	    return (char *) 0 ;
-	 }
-   }
-
-   key_len-- ;
-   while (target = strchr(target, k))
-   {
-      if (strncmp(target + 1, key + 1, key_len) == 0)  return target ;
-      else  target++ ;
-   }
-   /*failed*/
-   return (char *) 0 ;
+    ARRAY ap = (ARRAY) sp->ptr ;
+    sp->type = C_DOUBLE ;
+    sp->dval = (double) ap->size ;
+    return sp ;
 }
 
 
+/* Sedwick calls this "brute-force algorithm"
+   Might be worthwhile trying Boyer-Moore or Knuth...
+
+   In 1991 strstr returned 0 for null key.
+   Logically, it should return target.
+
+   So if use for something else modify first return.
+
+   However, leaving as is for mawk
+*/
+
+char *
+str_str(const char* target, size_t target_len,
+        const char* key, size_t key_len)
+{
+    int k ;
+
+    if (key_len == 0) return 0 ;
+
+    k = key[0] ;
+
+    if (key_len == 1) {
+	return target_len > 0 ? (char *)memchr(target,k,target_len) : 0 ;
+    }
+    else {
+        const char* const end = target + target_len - key_len + 1 ;
+
+	while(target < end) {
+	    target = (const char *)memchr(target,k,end-target) ;
+	    if (target == 0) return 0 ;
+	    if (memcmp(target+1 , key+1, key_len - 1) == 0) {
+	        return (char*) target ;
+	    }
+	    target++ ;
+	}
+	return 0 ;
+    }
+}
+
 
 CELL *
-bi_index(sp)
-   register CELL *sp ;
+bi_index(CELL* sp)
 {
    register int idx ;
-   unsigned len ;
+   size_t len ;
    char *p ;
 
    sp-- ;
    if (TEST2(sp) != TWO_STRINGS)  cast2_to_s(sp) ;
 
-   if (len = string(sp + 1)->len)
-      idx = (p = str_str(string(sp)->str, string(sp + 1)->str, len))
+   if ((len = string(sp + 1)->len)) {
+      idx = (p = str_str(string(sp)->str, string(sp)->len,
+                    string(sp + 1)->str, len))
 	 ? p - string(sp)->str + 1 : 0 ;
-
+   }
    else				/* index of the empty string */
       idx = 1 ;
 
@@ -225,8 +207,7 @@ bi_index(sp)
     from  max(1,i) to min(l,n-i-1) inclusive */
 
 CELL *
-bi_substr(sp)
-   CELL *sp ;
+bi_substr(CELL* sp)
 {
    int n_args, len ;
    register int i, n ;
@@ -253,9 +234,9 @@ bi_substr(sp)
    else
    {
       if (TEST2(sp + 1) != TWO_DOUBLES)	 cast2_to_d(sp + 1) ;
-      n = d_to_i(sp[2].dval) ;
+      n = d_to_int(sp[2].dval) ;
    }
-   i = d_to_i(sp[1].dval) - 1 ;	 /* i now indexes into string */
+   i = d_to_int(sp[1].dval) - 1 ;	 /* i now indexes into string */
 
    if ( i < 0 ) { n += i ; i = 0 ; }
    if (n > len - i)  n = len - i ;
@@ -281,11 +262,10 @@ bi_substr(sp)
 */
 
 CELL *
-bi_match(sp)
-   register CELL *sp ;
+bi_match(CELL* sp)
 {
    char *p ;
-   unsigned length ;
+   size_t length ;
 
    if (sp->type != C_RE)  cast_to_RE(sp) ;
    if ((--sp)->type < C_STRING)	 cast1_to_s(sp) ;
@@ -295,7 +275,7 @@ bi_match(sp)
    RSTART->type = C_DOUBLE ;
    RLENGTH->type = C_DOUBLE ;
 
-   p = REmatch(string(sp)->str, (sp + 1)->ptr, &length) ;
+   p = REmatch(string(sp)->str, string(sp)->len, (sp + 1)->ptr, &length, 0) ;
 
    if (p)
    {
@@ -317,8 +297,7 @@ bi_match(sp)
 }
 
 CELL *
-bi_toupper(sp)
-   CELL *sp ;
+bi_toupper(CELL* sp)
 {
    STRING *old ;
    register char *p, *q ;
@@ -339,8 +318,7 @@ bi_toupper(sp)
 }
 
 CELL *
-bi_tolower(sp)
-   CELL *sp ;
+bi_tolower(CELL* sp)
 {
    STRING *old ;
    register char *p, *q ;
@@ -365,6 +343,7 @@ bi_tolower(sp)
   arithemetic builtins
  ************************************************/
 
+#if STDC_MATHERR
 static void
 fplib_err(fname, val, error)
    char *fname ;
@@ -373,11 +352,11 @@ fplib_err(fname, val, error)
 {
    rt_error("%s(%g) : %s", fname, val, error) ;
 }
+#endif
 
 
 CELL *
-bi_sin(sp)
-   register CELL *sp ;
+bi_sin(CELL* sp)
 {
 #if ! STDC_MATHERR
    if (sp->type != C_DOUBLE)  cast1_to_d(sp) ;
@@ -396,8 +375,7 @@ bi_sin(sp)
 }
 
 CELL *
-bi_cos(sp)
-   register CELL *sp ;
+bi_cos(CELL* sp)
 {
 #if ! STDC_MATHERR
    if (sp->type != C_DOUBLE)  cast1_to_d(sp) ;
@@ -416,8 +394,7 @@ bi_cos(sp)
 }
 
 CELL *
-bi_atan2(sp)
-   register CELL *sp ;
+bi_atan2(CELL* sp)
 {
 #if  !	STDC_MATHERR
    sp-- ;
@@ -436,12 +413,20 @@ bi_atan2(sp)
 }
 
 CELL *
-bi_log(sp)
-   register CELL *sp ;
+bi_log(CELL* sp)
 {
 #if ! STDC_MATHERR
    if (sp->type != C_DOUBLE)  cast1_to_d(sp) ;
-   sp->dval = log(sp->dval) ;
+
+   /* Test on many platforms show inconsistent handling of at least
+      negative arguments, so we do our own argument filtering here */
+   if (sp->dval < 0.0)
+      sp->dval = nan_("");
+   else if (sp->dval == 0.0)
+      sp->dval = -infty_();
+   else
+      sp->dval = log(sp->dval) ;
+
    return sp ;
 #else
    double x;
@@ -456,8 +441,7 @@ bi_log(sp)
 }
 
 CELL *
-bi_exp(sp)
-   register CELL *sp ;
+bi_exp(CELL* sp)
 {
 #if  ! STDC_MATHERR
    if (sp->type != C_DOUBLE)  cast1_to_d(sp) ;
@@ -477,8 +461,7 @@ bi_exp(sp)
 }
 
 CELL *
-bi_int(sp)
-   register CELL *sp ;
+bi_int(CELL* sp)
 {
    if (sp->type != C_DOUBLE)  cast1_to_d(sp) ;
    sp->dval = sp->dval >= 0.0 ? floor(sp->dval) : ceil(sp->dval) ;
@@ -486,8 +469,7 @@ bi_int(sp)
 }
 
 CELL *
-bi_sqrt(sp)
-   register CELL *sp ;
+bi_sqrt(CELL* sp)
 {
 #if  ! STDC_MATHERR
    if (sp->type != C_DOUBLE)  cast1_to_d(sp) ;
@@ -505,95 +487,128 @@ bi_sqrt(sp)
 #endif
 }
 
-#ifndef NO_TIME_H
-#include <time.h>
-#else
-#include <sys/types.h>
-#endif
-
-
-/* For portability, we'll use our own random number generator , taken
-   from:  Park, SK and Miller KW, "Random Number Generators:
+#ifdef  USE_INTERNAL_RNG
+/* This is the RNG from
+ * Park, SK and Miller KW, "Random Number Generators:
    Good Ones are Hard to Find", CACM, 31, 1192-1201, 1988.
+
+   Note this implemenation requires sizeof(int) == 4.
+   Should use int32_t, but we only use this if random() is
+   missing which means <stdint.h> is missing too.
+
+   In 1993 Park and Miller suggested changing
+   A from 16807 to 48271 which we've done
 */
+static int seed = 1;
 
-static long seed ;		 /* must be >=1 and < 2^31-1 */
-static CELL cseed ;		 /* argument of last call to srand() */
+static
+double
+mawk_random(void)
+{
+    static const int M = 0x7fffffff;	/* 2^31-1 */
+    static const int A = 48271;	/* used to be 16807 */
+    static const int Q = 0x7fffffff / 48271;
+    static const int R = 0x7fffffff % 48271;
 
-#define		M	0x7fffffff	/* 2^31-1 */
-#define		MX	0xffffffff
-#define		A	16807
-#define	  	Q	127773		/* M/A */
-#define	  	R	2836		/* M%A */
+    int s = seed;
+    s = A * (s % Q) - R * (s / Q);
+    if (s <= 0)
+	s += M;
+    seed = s;
+    return (double) s / (double) M;
+}
 
-#if M == MAX__LONG
-#define crank(s)   s = A * (s % Q) - R * (s / Q) ;\
-		   if ( s <= 0 ) s += M
-#else
-/* 64 bit longs */
-#define crank(s)	{ unsigned long t = s ;\
-			  t = (A * (t % Q) - R * (t / Q)) & MX ;\
-			  if ( t >= M ) t = (t+M)&M ;\
-			  s = t ;\
-			}
+static void
+mawk_srand(unsigned int u)
+{
+    u %= 0x7fffffff;
+    if (u == 0) {
+	u = 314159265;
+    }
+    seed = u;
+}
+
+#else /* use random() and srandom() from stdlib */
+
+static double
+mawk_random(void)
+{
+    return (double) random() / (double) RAND_MAX;
+}
+
+static void
+mawk_srand(unsigned int u)
+{
+    srandom(u);
+}
+
 #endif
 
+static
+CELL prev_seed = /* for return value of srand() */
+    {C_DOUBLE, 0, 1.0};
 
 CELL *
-bi_srand(sp)
-   register CELL *sp ;
+bi_srand(CELL *sp)
 {
-   CELL c ;
+    int nargs = sp->type;
+    CELL c;
 
-   if (sp->type == 0)		/* seed off clock */
-   {
-      cellcpy(sp, &cseed) ;
-      cell_destroy(&cseed) ;
-      cseed.type = C_DOUBLE ;
-      cseed.dval = (double) time((time_t *) 0) ;
-   }
-   else	 /* user seed */
-   {
-      sp-- ;
-      /* swap cseed and *sp ; don't need to adjust ref_cnts */
-      c = *sp ; *sp = cseed ; cseed = c ;
-   }
+    if (nargs == 0) {
+	/* srand() */
+	/* construct a random seed using gettimeofday,
+	 * fractional bits should be quite random */
+	struct timeval tv;
+	char buffer[128];
+	gettimeofday(&tv, 0);
+	sprintf(buffer, "#srand%ld.%ld#", (long) tv.tv_sec, (long) tv.tv_usec);
+	sp->type = C_STRING;
+	sp->ptr = new_STRING(buffer);
+    }
+    else {
+	sp--;
+    }
 
-   /* The old seed is now in *sp ; move the value in cseed to
-     seed in range [1,M) */
+    /* new seed is in *sp, swap it with prev_seed
+     * no ref_cnt adjust needed since a swap ,
+     * this puts the return value in *sp */
+    c = *sp;
+    *sp = prev_seed;
+    prev_seed = c;
 
-   cellcpy(&c, &cseed) ;
-   if (c.type == C_NOINIT)  cast1_to_d(&c) ;
+    cellcpy(&c, &prev_seed);
+    /* now use c to compute an unsigned for call to mawk_srand() */
+    {
+	unsigned uval;
+	int done = 0;
+	if (c.type == C_DOUBLE) {
+	    /* if exact integer, make small minds happy */
+	    double d = c.dval;
+	    int ival = d_to_int(d);
+	    if ((double) ival == d) {
+		uval = ival;
+		done = 1;
+	    }
+	}
 
-   seed = c.type == C_DOUBLE ? (d_to_i(c.dval) & M) % M + 1 :
-      hash(string(&c)->str) % M + 1 ;
-   if( seed == M ) seed = M-1 ;
-
-   cell_destroy(&c) ;
-
-   /* crank it once so close seeds don't give a close
-       first result  */
-   crank(seed) ;
-
-   return sp ;
+	if (!done) {
+	    cast1_to_s(&c);
+	    uval = hash2(string(&c)->str, string(&c)->len);
+	    cell_destroy(&c);
+	}
+	mawk_srand(uval);
+    }
+    return sp ;
 }
 
 CELL *
-bi_rand(sp)
-   register CELL *sp ;
+bi_rand(CELL *sp)
 {
-   crank(seed) ;
-   sp++ ;
-   sp->type = C_DOUBLE ;
-   sp->dval = (double) seed / (double) M ;
-   return sp ;
+    sp++;
+    sp->type = C_DOUBLE;
+    sp->dval = mawk_random();
+    return sp ;
 }
-#undef	 A
-#undef	 M
-#undef   MX
-#undef	 Q
-#undef	 R
-#undef   crank
 
 /*************************************************
  miscellaneous builtins
@@ -601,9 +616,10 @@ bi_rand(sp)
  fflush
  *************************************************/
 
+static double exit_status_d(int) ;
+
 CELL *
-bi_close(sp)
-   register CELL *sp ;
+bi_close(CELL* sp)
 {
    int x ;
 
@@ -611,18 +627,22 @@ bi_close(sp)
    x = file_close((STRING *) sp->ptr) ;
    free_STRING(string(sp)) ;
    sp->type = C_DOUBLE ;
-   sp->dval = (double) x ;
+   sp->dval = exit_status_d(x) ;
    return sp ;
 }
 
 
 CELL *
-bi_fflush(sp)
-   register CELL *sp ;
+bi_fflush(CELL* sp)
 {
    int ret = 0 ;
 
-   if ( sp->type == 0 )  fflush(stdout) ;
+   if ( sp->type == 0 )  {
+       if (fflush(stdout) < 0) {
+           write_error(stdout) ;
+	   mawk_exit(2) ;
+       }
+   }
    else
    {
       sp-- ;
@@ -636,47 +656,37 @@ bi_fflush(sp)
    return sp ;
 }
 
+/* return from system(), wait(), pclose() is converted
+           to a normal exit status or 256 + # of killing signal */
+static double exit_status_d(int status)
+{
+    int ret ;
+    if (status == -1) return -1.0 ;
+    if (WIFEXITED(status)) {
+        ret = WEXITSTATUS(status) ;
+    }
+    else {
+        ret = WTERMSIG(status) + 256 ; /* ok Arnold? */
+    }
+    return (double) ret ;
+}
+        
 
-
-#if   HAVE_REAL_PIPES
 
 CELL *
-bi_system(sp)
-   CELL *sp ;
+bi_system(CELL* sp)
 {
-   int pid ;
-   unsigned ret_val ;
+    int status ;
 
-   if (sp->type < C_STRING)  cast1_to_s(sp) ;
+    if (sp->type < C_STRING)  cast1_to_s(sp) ;
+    flush_all_output() ;
+    status = system(string(sp)->str) ;
 
-   flush_all_output() ;
-   switch (pid = fork())
-   {
-      case -1:			/* fork failed */
-
-	 errmsg(errno, "could not create a new process") ;
-	 ret_val = 127 ;
-	 break ;
-
-      case 0:			/* the child */
-	 execl(shell, shell, "-c", string(sp)->str, (char *) 0) ;
-	 /* if get here, execl() failed */
-	 errmsg(errno, "execute of %s failed", shell) ;
-	 fflush(stderr) ;
-	 _exit(127) ;
-
-      default:			/* wait for the child */
-	 ret_val = wait_for(pid) ;
-	 break ;
-   }
-
-   cell_destroy(sp) ;
-   sp->type = C_DOUBLE ;
-   sp->dval = (double) ret_val ;
-   return sp ;
+    cell_destroy(sp) ;
+    sp->type = C_DOUBLE ;
+    sp->dval = exit_status_d(status) ;
+    return sp ;
 }
-
-#endif /* HAVE_REAL_PIPES */
 
 
 
@@ -709,12 +719,12 @@ bi_system(sp)
 */
 
 CELL *
-bi_getline(sp)
-   register CELL *sp ;
+bi_getline(CELL* sp)
 {
-   CELL tc, *cp ;
-   char *p ;
-   unsigned len ;
+   CELL tc ;
+   CELL* cp = 0 ;
+   char *p = 0 ;
+   size_t len ;
    FIN *fin_p ;
 
 
@@ -735,7 +745,7 @@ bi_getline(sp)
       case F_IN:
 	 sp-- ;
 	 if (sp->type < C_STRING)  cast1_to_s(sp) ;
-	 fin_p = (FIN *) file_find(sp->ptr, F_IN) ;
+	 fin_p = (FIN *) file_find((STRING *)sp->ptr, F_IN) ;
 	 free_STRING(string(sp)) ;
 	 sp-- ;
 
@@ -751,17 +761,13 @@ bi_getline(sp)
       case PIPE_IN:
 	 sp -= 2 ;
 	 if (sp->type < C_STRING)  cast1_to_s(sp) ;
-	 fin_p = (FIN *) file_find(sp->ptr, PIPE_IN) ;
+	 fin_p = (FIN *) file_find((STRING *)sp->ptr, PIPE_IN) ;
 	 free_STRING(string(sp)) ;
 
 	 if (!fin_p)  goto open_failure ;
 	 if (!(p = FINgets(fin_p, &len)))
 	 {
 	    FINsemi_close(fin_p) ;
-#if  HAVE_REAL_PIPES
-	    /* reclaim process slot */
-	    wait_for(0) ;
-#endif
 	    goto eof ;
 	 }
 	 cp = (CELL *) (sp + 1)->ptr ;
@@ -777,14 +783,12 @@ bi_getline(sp)
    if (len == 0)
    {
       tc.type = C_STRING ;
-      tc.ptr = (PTR) & null_str ;
-      null_str.ref_cnt++ ;
+      tc.ptr = STRING_dup(the_empty_str) ;
    }
    else
    {
       tc.type = C_MBSTRN ;
-      tc.ptr = (PTR) new_STRING0(len) ;
-      memcpy(string(&tc)->str, p, len) ;
+      tc.ptr = (PTR) new_STRING2(p,len) ;
    }
 
    slow_cell_assign(cp, &tc) ;
@@ -805,211 +809,505 @@ bi_getline(sp)
  sub() and gsub()
  **********************************************/
 
+/* helper function:
+   inputs: replv is Replv_Data*
+           match and m_len are a string and its length
+
+	   The pieces of replv and & replaced by match
+	   are copied to target
+
+   return: the total size copied to target
+*/
+
+static size_t
+replace_v_copy(char *target, const Replv_Data * replv, const char *match, size_t m_len)
+{
+    size_t ret = 0;
+    unsigned cnt = replv->cnt;
+    unsigned i;
+    STRING **sv = replv->pieces;
+    for (i = 0; i < cnt; i++) {
+	STRING *str = sv[i];
+	if (str) {
+	    memcpy(target, str->str, str->len);
+	    target += str->len;
+	    ret += str->len;
+	} else {
+	    memcpy(target, match, m_len);
+	    target += m_len;
+	    ret += m_len;
+	}
+    }
+    return ret;
+}
+
 /* entry:  sp[0] = address of CELL to sub on
 	   sp[-1] = substitution CELL
 	   sp[-2] = regular expression to match
 */
 
 CELL *
-bi_sub(sp)
-   register CELL *sp ;
+bi_sub(CELL *sp)
 {
-   CELL *cp ;			 /* pointer to the replacement target */
-   CELL tc ;			 /* build the new string here */
-   CELL sc ;			 /* copy of the target CELL */
-   char *front, *middle, *back ; /* pieces */
-   unsigned front_len, middle_len, back_len ;
+    CELL *cp;			/* pointer to the replacement target */
+    CELL tc;			/* build the new string here */
+    CELL sc;			/* copy of the target CELL */
+    char *front, *match, *back;	/* pieces */
+    size_t front_len, match_len, back_len;
+    size_t input_len;
+    size_t result_len;
 
-   sp -= 2 ;
-   if (sp->type != C_RE)  cast_to_RE(sp) ;
-   if (sp[1].type != C_REPL && sp[1].type != C_REPLV)
-      cast_to_REPL(sp + 1) ;
-   cp = (CELL *) (sp + 2)->ptr ;
-   /* make a copy of the target, because we won't change anything
-     including type unless the match works */
-   cellcpy(&sc, cp) ;
-   if (sc.type < C_STRING)  cast1_to_s(&sc) ;
-   front = string(&sc)->str ;
+    sp -= 2;
+    if (sp->type != C_RE)
+	cast_to_RE(sp);
+    if (sp[1].type != C_REPL && sp[1].type != C_REPLV)
+	cast_to_REPL(sp + 1);
+    cp = (CELL *) (sp + 2)->ptr;
+    /* make a copy of the target, because we won't change anything
+       including type unless the match works */
+    cellcpy(&sc, cp);
+    if (sc.type < C_STRING)
+	cast1_to_s(&sc);
+    front = string(&sc)->str;
+    input_len = string(&sc)->len;
 
-   if (middle = REmatch(front, sp->ptr, &middle_len))
-   {
-      front_len = middle - front ;
-      back = middle + middle_len ;
-      back_len = string(&sc)->len - front_len - middle_len ;
+    if ((match = REmatch(front, string(&sc)->len, sp->ptr, &match_len, 0))) {
+	front_len = (size_t) (match - front);
+	back = match + match_len;
+	back_len = input_len - front_len - match_len;
 
-      if ((sp + 1)->type == C_REPLV)
-      {
-	 STRING *sval = new_STRING0(middle_len) ;
+	if ((sp + 1)->type == C_REPLV) {
+	    Replv_Data *rd = (Replv_Data *) (sp + 1)->ptr;
+	    result_len = input_len + rd->piece_len
+		+ (rd->amp_cnt - 1) * match_len;
+	} else {
+	    result_len = input_len + string(sp + 1)->len - match_len;
+	}
 
-	 memcpy(sval->str, middle, middle_len) ;
-	 replv_to_repl(sp + 1, sval) ;
-	 free_STRING(sval) ;
-      }
+	tc.type = C_STRING;
+	tc.ptr = (PTR) new_STRING0(result_len);
 
-      tc.type = C_STRING ;
-      tc.ptr = (PTR) new_STRING0(
-			front_len + string(sp + 1)->len + back_len) ;
+	{
+	    char *p = string(&tc)->str;
 
-      {
-	 char *p = string(&tc)->str ;
+	    if (front_len) {
+		memcpy(p, front, front_len);
+		p += front_len;
+	    }
+	    if ((sp + 1)->type == C_REPL) {
+		memcpy(p, string(sp + 1)->str, string(sp + 1)->len);
+		p += string(sp + 1)->len;
+	    } else {		/* C_REPLV  */
+		size_t sz = replace_v_copy(p, (Replv_Data *) (sp + 1)->ptr,
+					   match, match_len);
+		p += sz;
+	    }
+	    if (back_len) {
+		memcpy(p, back, back_len);
+	    }
+	}
 
-	 if (front_len)
-	 {
-	    memcpy(p, front, front_len) ;
-	    p += front_len ;
-	 }
-	 if (string(sp + 1)->len)
-	 {
-	    memcpy(p, string(sp + 1)->str, string(sp + 1)->len) ;
-	    p += string(sp + 1)->len ;
-	 }
-	 if (back_len)	memcpy(p, back, back_len) ;
-      }
+	slow_cell_assign(cp, &tc);
 
-      slow_cell_assign(cp, &tc) ;
+	free_STRING(string(&tc));
+    }
 
-      free_STRING(string(&tc)) ;
-   }
+    free_STRING(string(&sc));
+    repl_destroy(sp + 1);
+    sp->type = C_DOUBLE;
+    sp->dval = match != (char *) 0 ? 1.0 : 0.0;
 
-   free_STRING(string(&sc)) ;
-   repl_destroy(sp + 1) ;
-   sp->type = C_DOUBLE ;
-   sp->dval = middle != (char *) 0 ? 1.0 : 0.0 ;
-   return sp ;
+    return sp ;
 }
 
-static unsigned repl_cnt ;	 /* number of global replacements */
+/* Gsub collects match information in a sequential container of
+ * Match_Point
+*/
+typedef struct {
+    const char *ptr;
+    size_t len;
+} Match_Point;
 
-/* recursive global subsitution
-   dealing with empty matches makes this mildly painful
+/* For 99.999% of uses, an  array would be big enough, but for the
+ * other .001% we need something that can grow
+*/
+
+#ifdef   MEM_CHECK
+#define GS_BUFFER_SZ   4	/* give list a workout */
+#else
+#define GS_BUFFER_SZ   512
+#endif
+
+typedef struct gsub_block {
+    Match_Point buffer[GS_BUFFER_SZ];
+    struct gsub_block *link;
+} Gsub_Block;
+
+static Gsub_Block *
+grow_gs_list(Gsub_Block * tail)
+{
+    tail = tail->link = (Gsub_Block *) emalloc(sizeof(Gsub_Block));
+    tail->link = 0;
+    return tail;
+}
+
+static void
+destroy_gs_list(Gsub_Block * p)
+{
+    while (p) {
+	Gsub_Block *hold = p;
+	p = p->link;
+	free(hold);
+    }
+}
+
+/*
+   The caller owns the data pointed to by the input parms.
+   The return is a new STRING allocated here but owned by the
+   caller on return with
+   replacement replacing each match of re in input_s.
+
+   replacement is a simple replacement not one with &
 */
 
 static STRING *
-gsub(re, repl, target, flag)
-   PTR re ;
-   CELL *repl ;			 /* always of type REPL or REPLV,
-       destroyed by caller */
-   char *target ;
-
-   /* if on, match of empty string at front is OK */
-   int flag ;
+gsub(const PTR re,
+     const STRING * replacement,
+     const STRING * input_s,
+     unsigned *cnt_p)
 {
-   char *front, *middle ;
-   STRING *back ;
-   unsigned front_len, middle_len ;
-   STRING *ret_val ;
-   CELL xrepl ;			 /* a copy of repl so we can change repl */
+    Gsub_Block first_block;
+    unsigned idx;
+    Gsub_Block *const gs_list_base = &first_block;
+    Gsub_Block *gs_block = gs_list_base;
+    unsigned cnt;		/* number of matches */
 
-   if (!(middle = REmatch(target, re, &middle_len)))
-      return new_STRING(target) ;/* no match */
+    const char *input = input_s->str;
+    const char *input_end = input + input_s->len;
+    size_t output_len = input_s->len;
 
-   cellcpy(&xrepl, repl) ;
+    gs_block->link = 0;
 
-   if (!flag && middle_len == 0 && middle == target)
-   {				/* match at front that's not allowed */
+    /* get the matches */
+    {
+	int zero_match_ok = 1;
+	/* get the first match */
+	size_t m_len;
+	const char *match_point =
+	REmatch(input, input_s->len, re, &m_len, 0);
 
-      if (*target == 0)		/* target is empty string */
-      {
-	 repl_destroy(&xrepl) ;
-	 null_str.ref_cnt++ ;
-	 return &null_str ;
-      }
-      else
-      {
-	 char xbuff[2] ;
+	if (match_point == 0) {
+	    /* no matches, so no subs
+	       add a ref cnt and return input_s */
+	    STRING *ret = (STRING *) input_s;
+	    *cnt_p = 0;
+	    ret->ref_cnt++;
+	    return ret;
+	}
 
-	 front_len = 0 ;
-	 /* make new repl with target[0] */
-	 repl_destroy(repl) ;
-	 xbuff[0] = *target++ ;	 xbuff[1] = 0 ;
-	 repl->type = C_REPL ;
-	 repl->ptr = (PTR) new_STRING(xbuff) ;
-	 back = gsub(re, &xrepl, target, 1) ;
-      }
-   }
-   else	 /* a match that counts */
-   {
-      repl_cnt++ ;
+	/* have first match */
+	gs_block->buffer[0].ptr = match_point;
+	gs_block->buffer[0].len = m_len;
+	output_len += (replacement->len - m_len);
+	cnt = 1;
+	idx = 1;
+	if (m_len > 0) {
+	    input = match_point + m_len;
+	    /* after a non-null match, next match cannot be zero length
+	       at front */
+	    zero_match_ok = 0;
+	} else {
+	    input = match_point + 1;
+	}
 
-      front = target ;
-      front_len = middle - target ;
+	/* get the rest */
+	while (input <= input_end) {
+	    match_point =
+		REmatch(input, input_end - input, re, &m_len,
+			1 /* turn off ^ */ );
+	    if (match_point == 0) {
+		break;
+	    }
 
-      if (*middle == 0)		/* matched back of target */
-      {
-	 back = &null_str ;
-	 null_str.ref_cnt++ ;
-      }
-      else  back = gsub(re, &xrepl, middle + middle_len, 0) ;
+	    if (match_point == input && m_len == 0 && !zero_match_ok) {
+		/* match of zero length to be skipped */
+		input++;
+		zero_match_ok = 1;
+		continue;
+	    }
 
-      /* patch the &'s if needed */
-      if (repl->type == C_REPLV)
-      {
-	 STRING *sval = new_STRING0(middle_len) ;
+	    gs_block->buffer[idx].ptr = match_point;
+	    gs_block->buffer[idx].len = m_len;
+	    output_len += (replacement->len - m_len);
+	    cnt++;
+	    if (m_len > 0) {
+		input = match_point + m_len;
+		zero_match_ok = 0;
+	    } else {
+		input = match_point + 1;
+		zero_match_ok = 1;
+	    }
+	    idx++;
+	    if (idx == GS_BUFFER_SZ) {
+		gs_block = grow_gs_list(gs_block);
+		idx = 0;
+	    }
+	}
+    }
 
-	 memcpy(sval->str, middle, middle_len) ;
-	 replv_to_repl(repl, sval) ;
-	 free_STRING(sval) ;
-      }
-   }
+    *cnt_p = cnt;
+    {				/* build the output and return it */
+	STRING *output = new_STRING0(output_len);
+	char *outp = output->str;
+	const char *rep = replacement->str;
+	size_t rep_len = replacement->len;
 
-   /* put the three pieces together */
-   ret_val = new_STRING0(front_len + string(repl)->len + back->len) ;
-   {
-      char *p = ret_val->str ;
+	size_t out_done = 0;	/* debug counter */
 
-      if (front_len)
-      {
-	 memcpy(p, front, front_len) ;
-	 p += front_len ;
-      }
+	idx = 0;
+	gs_block = gs_list_base;
+	input = input_s->str;
 
-      if (string(repl)->len)
-      {
-	 memcpy(p, string(repl)->str, string(repl)->len) ;
-	 p += string(repl)->len ;
-      }
-      if (back->len)  memcpy(p, back->str, back->len) ;
-   }
+	while (1) {
+	    size_t sz;
+	    Match_Point mp = gs_block->buffer[idx];
+	    sz = mp.ptr - input;
+	    memcpy(outp, input, sz);
+	    outp += sz;
+	    out_done += sz;
+	    /* append replacement */
+	    memcpy(outp, rep, rep_len);
+	    outp += rep_len;
+	    out_done += rep_len;
 
-   /* cleanup, repl is freed by the caller */
-   repl_destroy(&xrepl) ;
-   free_STRING(back) ;
+	    if (mp.len == 0 && mp.ptr < input_end) {
+		/* match is in front of mp.ptr */
+		*outp++ = *mp.ptr;
+		input = mp.ptr + 1;
+		out_done += 1;
+	    } else {
+		input = mp.ptr + mp.len;
+	    }
 
-   return ret_val ;
+	    cnt--;
+	    if (cnt == 0) {
+		/* cpy what's left if any */
+		if (input < input_end) {
+		    memcpy(outp, input, input_end - input);
+		    out_done += input_end - input;
+		}
+		break;
+	    }
+	    idx++;
+	    if (idx == GS_BUFFER_SZ) {
+		gs_block = gs_block->link;
+		idx = 0;
+	    }
+	}
+	/* done, cleanup and return */
+	if (out_done != output->len) {
+	    bozo("invalid output length in gsub");
+	}
+	destroy_gs_list(gs_list_base->link);
+	return output;
+    }
+}
+
+/*
+   The caller owns the data pointed to by the input parms.
+   The return is a new STRING allocated here but owned by the
+   caller on return with
+   replacev replacing each match of re in input_s.
+
+   Mostly a copy of gsub() above, difference is
+   replacev is a vector replacement, one with &
+*/
+
+static STRING *
+gsubv(const PTR re,
+      const Replv_Data * replacev,
+      const STRING * input_s,
+      unsigned *cnt_p)
+{
+    Gsub_Block first_block;
+    unsigned idx;
+    Gsub_Block *const gs_list_base = &first_block;
+    Gsub_Block *gs_block = gs_list_base;
+    unsigned cnt;		/* number of matches */
+
+    const char *input = input_s->str;
+    const char *input_end = input + input_s->len;
+    size_t output_len = input_s->len;
+
+    size_t replace_len = replacev->piece_len;
+    unsigned amp_cnt = replacev->amp_cnt;
+
+    gs_block->link = 0;
+
+    /* get the matches */
+    {
+	int zero_match_ok = 1;
+	/* get the first match */
+	size_t m_len;
+	const char *match_point =
+	REmatch(input, input_s->len, re, &m_len, 0);
+
+	if (match_point == 0) {
+	    /* no matches, so no subs
+	       add a ref cnt and return input_s */
+	    STRING *ret = (STRING *) input_s;
+	    *cnt_p = 0;
+	    ret->ref_cnt++;
+	    return ret;
+	}
+
+	/* have first match */
+	gs_block->buffer[0].ptr = match_point;
+	gs_block->buffer[0].len = m_len;
+	output_len += (replace_len + (amp_cnt - 1) * m_len);
+	cnt = 1;
+	idx = 1;
+	if (m_len > 0) {
+	    input = match_point + m_len;
+	    /* after a non-null match, next match cannot be zero length
+	       at front */
+	    zero_match_ok = 0;
+	} else {
+	    input = match_point + 1;
+	}
+
+	/* get the rest */
+	while (input <= input_end) {
+	    match_point =
+		REmatch(input, input_end - input, re, &m_len,
+			1 /* turn off ^ */ );
+	    if (match_point == 0) {
+		break;
+	    }
+
+	    if (match_point == input && m_len == 0 && !zero_match_ok) {
+		/* match of zero length to be skipped */
+		input++;
+		zero_match_ok = 1;
+		continue;
+	    }
+
+	    gs_block->buffer[idx].ptr = match_point;
+	    gs_block->buffer[idx].len = m_len;
+	    output_len += (replace_len + (amp_cnt - 1) * m_len);
+	    cnt++;
+	    if (m_len > 0) {
+		input = match_point + m_len;
+		zero_match_ok = 0;
+	    } else {
+		input = match_point + 1;
+		zero_match_ok = 1;
+	    }
+	    idx++;
+	    if (idx == GS_BUFFER_SZ) {
+		gs_block = grow_gs_list(gs_block);
+		idx = 0;
+	    }
+	}
+    }
+
+    *cnt_p = cnt;
+    {				/* build the output and return it */
+	STRING *output = new_STRING0(output_len);
+	char *outp = output->str;
+
+	size_t out_done = 0;	/* debug counter */
+
+	idx = 0;
+	gs_block = gs_list_base;
+	input = input_s->str;
+
+	while (1) {
+	    size_t sz;
+	    Match_Point mp = gs_block->buffer[idx];
+	    sz = mp.ptr - input;
+	    memcpy(outp, input, sz);
+	    outp += sz;
+	    out_done += sz;
+	    /* append replacement */
+	    sz = replace_v_copy(outp, replacev, mp.ptr, mp.len);
+	    outp += sz;
+	    out_done += sz;
+
+	    if (mp.len == 0 && mp.ptr < input_end) {
+		/* match is in front of mp.ptr */
+		*outp++ = *mp.ptr;
+		input = mp.ptr + 1;
+		out_done += 1;
+	    } else {
+		input = mp.ptr + mp.len;
+	    }
+
+	    cnt--;
+	    if (cnt == 0) {
+		/* cpy what's left if any */
+		if (input < input_end) {
+		    memcpy(outp, input, input_end - input);
+		    out_done += input_end - input;
+		}
+		break;
+	    }
+	    idx++;
+	    if (idx == GS_BUFFER_SZ) {
+		gs_block = gs_block->link;
+		idx = 0;
+	    }
+	}
+	/* done, cleanup and return */
+	if (out_done != output->len) {
+	    bozo("invalid output length in gsub");
+	}
+	destroy_gs_list(gs_list_base->link);
+	return output;
+    }
 }
 
 /* set up for call to gsub() */
 CELL *
-bi_gsub(sp)
-   register CELL *sp ;
+bi_gsub(CELL *sp)
 {
-   CELL *cp ;			 /* pts at the replacement target */
-   CELL sc ;			 /* copy of replacement target */
-   CELL tc ;			 /* build the result here */
+    CELL *cp;			/* pts at the replacement target */
+    CELL sc;			/* copy of replacement target */
+    CELL tc;			/* build the result here */
+    unsigned repl_cnt;
 
-   sp -= 2 ;
-   if (sp->type != C_RE)  cast_to_RE(sp) ;
-   if ((sp + 1)->type != C_REPL && (sp + 1)->type != C_REPLV)
-      cast_to_REPL(sp + 1) ;
+    sp -= 2;
+    if (sp->type != C_RE)
+	cast_to_RE(sp);
+    if ((sp + 1)->type != C_REPL && (sp + 1)->type != C_REPLV)
+	cast_to_REPL(sp + 1);
 
-   cellcpy(&sc, cp = (CELL *) (sp + 2)->ptr) ;
-   if (sc.type < C_STRING)  cast1_to_s(&sc) ;
+    cp = (CELL *) (sp + 2)->ptr;
+    cellcpy(&sc, cp);
+    if (sc.type < C_STRING) {
+	cast1_to_s(&sc);
+    }
 
-   repl_cnt = 0 ;
-   tc.ptr = (PTR) gsub(sp->ptr, sp + 1, string(&sc)->str, 1) ;
+    repl_cnt = 0;
+    if ((sp + 1)->type == C_REPL) {
+	tc.ptr = gsub(sp->ptr, string(sp + 1), string(&sc), &repl_cnt);
+    } else {
+	tc.ptr = (PTR) gsubv(sp->ptr, (Replv_Data *) (sp + 1)->ptr,
+			     string(&sc), &repl_cnt);
+    }
 
-   if (repl_cnt)
-   {
-      tc.type = C_STRING ;
-      slow_cell_assign(cp, &tc) ;
-   }
+    if (repl_cnt) {
+	tc.type = C_STRING;
+	slow_cell_assign(cp, &tc);
+    }
 
-   /* cleanup */
-   free_STRING(string(&sc)) ; free_STRING(string(&tc)) ;
-   repl_destroy(sp + 1) ;
+    /* cleanup */
+    free_STRING(string(&sc));
+    free_STRING(string(&tc));
+    repl_destroy(sp + 1);
 
-   sp->type = C_DOUBLE ;
-   sp->dval = (double) repl_cnt ;
-   return sp ;
+    sp->type = C_DOUBLE;
+    sp->dval = (double) repl_cnt;
+
+    return sp ;
 }
-

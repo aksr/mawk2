@@ -1,51 +1,19 @@
 
 /********************************************
 code.c
-copyright 1991-93, Michael D. Brennan
+copyright 1991-93,2014-2016  Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
 
-/* $Log: code.c,v $
- * Revision 1.6  1995/06/18  19:42:13  mike
- * Remove some redundant declarations and add some prototypes
- *
- * Revision 1.5  1995/06/09  23:21:36  mike
- * make sure there is an execution block in case user defines function,
- * but no pattern-action pairs
- *
- * Revision 1.4  1995/03/08  00:06:22  mike
- * add a pointer cast
- *
- * Revision 1.3  1994/10/08  19:15:29  mike
- * remove SM_DOS
- *
- * Revision 1.2  1993/07/07  00:07:38  mike
- * more work on 1.2
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:10  mike
- * move source to cvs
- *
- * Revision 5.4	 1993/01/14  13:11:11  mike
- * code2() -> xcode2()
- *
- * Revision 5.3	 1993/01/09  20:15:35  mike
- * code_pop checks if the resolve_list needs relocation
- *
- * Revision 5.2	 1993/01/07  02:50:33  mike
- * relative vs absolute code
- *
- * Revision 5.1	 1991/12/05  07:55:43  brennan
- * 1.1 pre-release
- *
-*/
-
-/*  code.c  */
 
 #include "mawk.h"
 #include "code.h"
@@ -54,7 +22,7 @@ the GNU General Public License, version 2, 1991.
 #include "field.h"
 
 
-static CODEBLOCK *PROTO(new_code, (void)) ;
+static CODEBLOCK* new_code(void) ;
 
 CODEBLOCK active_code ;
 
@@ -68,7 +36,7 @@ INST *execution_start = 0 ;
 
 /* grow the active code */
 void
-code_grow()
+code_grow(void)
 {
    unsigned oldsize = code_limit - code_base ;
    unsigned newsize = PAGESZ + oldsize ;
@@ -86,9 +54,7 @@ code_grow()
 
 /* shrinks executable code that's done to its final size */
 INST *
-code_shrink(p, sizep)
-   CODEBLOCK *p ;
-   unsigned *sizep ;
+code_shrink(CODEBLOCK* p, unsigned* sizep)
 {
 
    unsigned oldsize = INST_BYTES(p->limit - p->base) ;
@@ -105,9 +71,7 @@ code_shrink(p, sizep)
 
 /* code an op and a pointer in the active_code */
 void
-xcode2(op, ptr)
-   int op ;
-   PTR ptr ;
+xcode2(int op, void* ptr)
 {
    register INST *p = code_ptr + 2 ;
 
@@ -124,8 +88,7 @@ xcode2(op, ptr)
 
 /* code two ops in the active_code */
 void
-code2op(x, y)
-   int x, y ;
+code2op(int x, int y)
 {
    register INST *p = code_ptr + 2 ;
 
@@ -141,7 +104,7 @@ code2op(x, y)
 }
 
 void
-code_init()
+code_init(void)
 {
    main_code_p = new_code() ;
 
@@ -152,7 +115,7 @@ code_init()
 /* final code relocation
    set_code() as in set concrete */
 void
-set_code()
+set_code(void)
 {
    /* set the main code which is active_code */
    if (end_code_p || code_offset > 1)
@@ -207,23 +170,23 @@ set_code()
 }
 
 void
-dump_code()
+dump_code(void)
 {
    fdump() ;			 /* dumps all user functions */
-   if (begin_start)  
-   { fprintf(stdout, "BEGIN\n") ; 
+   if (begin_start)
+   { fprintf(stdout, "BEGIN\n") ;
      da(begin_start, stdout) ; }
-   if (end_start)  
-   { fprintf(stdout, "END\n") ; 
+   if (end_start)
+   { fprintf(stdout, "END\n") ;
      da(end_start, stdout) ; }
-   if (main_start)  
-   { fprintf(stdout, "MAIN\n") ; 
+   if (main_start)
+   { fprintf(stdout, "MAIN\n") ;
      da(main_start, stdout) ; }
 }
 
 
 static CODEBLOCK *
-new_code()
+new_code(void)
 {
    CODEBLOCK *p = ZMALLOC(CODEBLOCK) ;
 
@@ -238,8 +201,7 @@ new_code()
 /* moves the active_code from MAIN to a BEGIN or END */
 
 void
-be_setup(scope)
-   int scope ;
+be_setup(int scope)
 {
    *main_code_p = active_code ;
 

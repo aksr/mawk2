@@ -1,71 +1,18 @@
 
 /********************************************
 fin.c
-copyright 1991, 1992.  Michael D. Brennan
+copyright 1991,1992,2014-2016  Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: fin.c,v $
- * Revision 1.10  1995/12/24  22:23:22  mike
- * remove errmsg() from inside FINopen
- *
- * Revision 1.9  1995/06/06  00:18:29  mike
- * change mawk_exit(1) to mawk_exit(2)
- *
- * Revision 1.8  1994/12/13  00:26:35  mike
- * rt_nr and rt_fnr for run-time error messages
- *
- * Revision 1.7  1994/12/11  23:25:05  mike
- * -Wi option
- *
- * Revision 1.6  1994/12/11  22:14:15  mike
- * remove THINK_C #defines.  Not a political statement, just no indication
- * that anyone ever used it.
- *
- * Revision 1.5  1994/10/08  19:15:42  mike
- * remove SM_DOS
- *
- * Revision 1.4  1993/07/17  13:22:55  mike
- * indent and general code cleanup
- *
- * Revision 1.3  1993/07/15  13:26:55  mike
- * SIZE_T and indent
- *
- * Revision 1.2	 1993/07/04  12:51:57  mike
- * start on autoconfig changes
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:13  mike
- * move source to cvs
- *
- * Revision 5.7	 1993/01/01  21:30:48  mike
- * split new_STRING() into new_STRING and new_STRING0
- *
- * Revision 5.6	 1992/12/17  02:48:01  mike
- * 1.1.2d changes for DOS
- *
- * Revision 5.5	 1992/07/28  15:11:30  brennan
- * minor change in finding eol, needed for MsDOS
- *
- * Revision 5.4	 1992/07/10  16:17:10  brennan
- * MsDOS: remove NO_BINMODE macro
- *
- * Revision 5.3	 1992/07/08  16:14:27  brennan
- * FILENAME and FNR retain last values in the
- * END block.
- *
- * Revision 5.2	 1992/02/21  13:30:08  brennan
- * fixed bug that free'd FILENAME twice if
- * command line was var=value only
- *
- * Revision 5.1	 91/12/05  07:56:02  brennan
- * 1.1 pre-release
- *
-*/
 
 /* fin.c */
 
@@ -76,47 +23,40 @@ the GNU General Public License, version 2, 1991.
 #include "field.h"
 #include "symtype.h"
 #include "scan.h"
-
-#ifndef	  NO_FCNTL_H
 #include <fcntl.h>
-#endif
 
 /* This file handles input files.  Opening, closing,
    buffering and (most important) splitting files into
    records, FINgets().
 */
 
-int PROTO(isatty, (int)) ;
-
-static FIN *PROTO(next_main, (int)) ;
-static char *PROTO(enlarge_fin_buffer, (FIN *)) ;
-static void PROTO(set_main_to_stdin, (void)) ;
-int PROTO(is_cmdline_assign, (char *)) ; /* also used by init */
+static char * enlarge_fin_buffer(FIN *) ;
+static void  set_main_to_stdin(void) ;
+int  is_cmdline_assign(char *) ; /* also used by init */ 
 
 /* convert file-descriptor to FIN*.
    It's the main stream if main_flag is set
 */
 FIN *
-FINdopen(fd, main_flag)
-   int fd, main_flag ;
+FINdopen(int fd, int main_flag)
 {
    register FIN *fin = ZMALLOC(FIN) ;
 
    fin->fd = fd ;
    fin->flags = main_flag ? (MAIN_FLAG | START_FLAG) : START_FLAG ;
-   fin->buffp = fin->buff = (char *) zmalloc(BUFFSZ + 1) ;
-   fin->nbuffs = 1 ;
-   fin->buff[0] = 0 ;
+   fin->end = fin->start = fin->buff = (char *) emalloc(FINBUFFSZ) ;
+   fin->buffsz = FINBUFFSZ ;
 
-   if (isatty(fd) && rs_shadow.type == SEP_CHAR && rs_shadow.c == '\n'
-       || interactive_flag && fd == 0 )
+   if ((isatty(fd) && rs_shadow.type == SEP_CHAR && rs_shadow.c == '\n')
+       || (interactive_flag && fd == 0) )
    {
       /* interactive, i.e., line buffer this file */
       if (fd == 0)  fin->fp = stdin ;
       else if (!(fin->fp = fdopen(fd, "r")))
       {
-	 errmsg(errno, "fdopen failed") ; mawk_exit(2) ; 
+	 errmsg(errno, "fdopen failed") ; mawk_exit(2) ;
       }
+      fin->fd = -1 ;  /* marks it interactive */
    }
    else	 fin->fp = (FILE *) 0 ;
 
@@ -129,9 +69,7 @@ FINdopen(fd, main_flag)
 */
 
 FIN *
-FINopen(filename, main_flag)
-   char *filename ;
-   int main_flag ;
+FINopen(const char* filename, int main_flag)
 {
    int fd ;
    int oflag = O_RDONLY ;
@@ -151,39 +89,55 @@ FINopen(filename, main_flag)
 
    if ((fd = open(filename, oflag, 0)) == -1)
       return (FIN *) 0 ;
-   else 
+   else
       return FINdopen(fd, main_flag) ;
 }
+
+FIN*
+FINpopen(const char* command)
+{
+    FIN* ret = 0 ;
+    FILE* fp = popen(command, "r") ;
+    if (fp) {
+        ret = FINdopen(fileno(fp), 0) ;
+	ret->fp = fp ;
+    }
+    return ret ;
+}
+
 
 /* frees the buffer and fd, but leaves FIN structure until
    the user calls close() */
 
 void
-FINsemi_close(fin)
-   register FIN *fin ;
+FINsemi_close(FIN* fin)
 {
-   static char dead = 0 ;
+    static char dead = 0 ;
 
-   if (fin->buff != &dead)
-   {
-      zfree(fin->buff, fin->nbuffs * BUFFSZ + 1) ;
+    if (fin->buff != &dead) {
+        free(fin->buff) ;
+	fin->buff = &dead ;
 
-      if (fin->fd)
-	 if (fin->fp)  fclose(fin->fp) ;
-	 else  close(fin->fd) ;
-
-      fin->buff = fin->buffp = &dead ;	 /* marks it semi_closed */
-   }
-   /* else was already semi_closed */
+	if (fin->fd == -1) {
+	    fin->close_val = fclose(fin->fp) ;
+	}
+	else if (fin->fp) {
+	    fin->close_val = pclose(fin->fp) ;
+	}
+	else fin->close_val = close(fin->fd) ;
+    }
+    /* else was already semi_closed */
 }
 
 /* user called close() on input file */
-void
-FINclose(fin)
-   FIN *fin ;
+int
+FINclose(FIN* fin)
 {
+   int ret ;
    FINsemi_close(fin) ;
+   ret = fin->close_val ;
    ZFREE(fin) ;
+   return ret ;
 }
 
 /* return one input record as determined by RS,
@@ -191,67 +145,70 @@ FINclose(fin)
 */
 
 char *
-FINgets(fin, len_p)
-   FIN *fin ;
-   unsigned *len_p ;
+FINgets(FIN* fin, size_t* len_p)
 {
-   register char *p, *q ;
-   unsigned match_len ;
-   unsigned r ;
+    char* rec_start ;
+    char* rec_end = 0 ;
+    size_t match_len ;
 
 restart :
 
-   if (!(p = fin->buffp)[0])	/* need a refill */
-   {
+    rec_start = fin->start ;
+
+    if (fin->start >= fin->end) {
       if (fin->flags & EOF_FLAG)
       {
 	 if (fin->flags & MAIN_FLAG)
 	 {
-	    fin = next_main(0) ;  goto restart ; 
+	    fin = next_main(0) ;  goto restart ;
 	 }
 	 else
 	 {
-	    *len_p = 0 ; return (char *) 0 ; 
+	    *len_p = 0 ; return (char *) 0 ;
 	 }
       }
 
-      if (fin->fp)
+      if (fin->fd == -1)
       {
 	 /* line buffering */
-	 if (!fgets(fin->buff, BUFFSZ + 1, fin->fp))
+	 if (!fgets(fin->buff, BUFFSZ - 1, fin->fp))
 	 {
 	    fin->flags |= EOF_FLAG ;
 	    fin->buff[0] = 0 ;
-	    fin->buffp = fin->buff ;
+	    fin->end = fin->start = fin->buff ;
 	    goto restart ;	 /* might be main_fin */
 	 }
 	 else  /* return this line */
 	 {
+	    /* TBD fix -- doesn't handle lines bigger than BUFFSZ-1 */
+	    /* low priority */
 	    /* find eol */
-	    p = fin->buff ;
+	    char* p = fin->buff ;
+
 	    while (*p != '\n' && *p != 0)  p++ ;
 
 	    *p = 0 ; *len_p = p - fin->buff ;
-	    fin->buffp = p ;
+	    fin->end = fin->start = p ;
 	    return fin->buff ;
 	 }
       }
       else
       {
 	 /* block buffering */
-	 r = fillbuff(fin->fd, fin->buff, fin->nbuffs * BUFFSZ) ;
+	 size_t r = fillbuff(fin->fd, fin->buff, fin->buffsz) ;
 	 if (r == 0)
 	 {
 	    fin->flags |= EOF_FLAG ;
-	    fin->buffp = fin->buff ;
+	    fin->end = fin->start = fin->buff ;
 	    goto restart ;	 /* might be main */
 	 }
-	 else if (r < fin->nbuffs * BUFFSZ)
+	 else if (r < fin->buffsz)
 	 {
 	    fin->flags |= EOF_FLAG ;
 	 }
 
-	 p = fin->buffp = fin->buff ;
+	 rec_start = fin->start = fin->buff ;
+	 fin->end = fin->start + r ;
 
 	 if (fin->flags & START_FLAG)
 	 {
@@ -259,9 +216,11 @@ restart :
 	    if (rs_shadow.type == SEP_MLR)
 	    {
 	       /* trim blank lines from front of file */
-	       while (*p == '\n')  p++ ;
-	       fin->buffp = p ;
-	       if (*p == 0)  goto restart ;
+	       while(rec_start < fin->end && *rec_start == '\n') rec_start++ ;
+	       fin->start = rec_start ;
+	       if (rec_start >= fin->end)  {
+	           goto restart ;
+	       }
 	    }
 	 }
       }
@@ -272,127 +231,136 @@ retry:
    switch (rs_shadow.type)
    {
       case SEP_CHAR:
-	 q = strchr(p, rs_shadow.c) ;
+	 rec_end = (char *)memchr(rec_start, rs_shadow.c, fin->end - rec_start) ;
 	 match_len = 1 ;
 	 break ;
 
       case SEP_STR:
-	 q = str_str(p, ((STRING *) rs_shadow.ptr)->str,
-		     match_len = ((STRING *) rs_shadow.ptr)->len) ;
-	 break ;
+	 {
+	     STRING* str = (STRING*) rs_shadow.ptr ;
+	     rec_end = str_str(rec_start, fin->end - rec_start, str->str, str->len) ;
+	     match_len = str->len ;
+	     break ;
+	 }
 
       case SEP_MLR:
       case SEP_RE:
-	 q = re_pos_match(p, rs_shadow.ptr, &match_len) ;
+	 rec_end = re_pos_match(rec_start,fin->end - rec_start, rs_shadow.ptr, &match_len,0) ;
 	 /* if the match is at the end, there might still be
 	       more to match in the file */
-	 if (q && q[match_len] == 0 && !(fin->flags & EOF_FLAG))
-	    q = (char *) 0 ;
+	 if (rec_end && rec_end + match_len == fin->end && !(fin->flags & EOF_FLAG)) {
+	    rec_end = (char *) 0 ;
+	 }
 	 break ;
 
       default:
 	 bozo("type of rs_shadow") ;
    }
 
-   if (q)
+   if (rec_end)
    {
       /* the easy and normal case */
-      *q = 0 ;	*len_p = q - p ;
-      fin->buffp = q + match_len ;
-      return p ;
+      *len_p = rec_end - rec_start ;
+      fin->start = rec_end + match_len ;
+      return rec_start ;
    }
 
    if (fin->flags & EOF_FLAG)
    {
-      /* last line without a record terminator */
-      *len_p = r = strlen(p) ; fin->buffp = p+r ;
+      /* last record without a record terminator */
+      *len_p = fin->end - rec_start ;
+      fin->start = fin->end ;
 
-      if (rs_shadow.type == SEP_MLR && fin->buffp[-1] == '\n'
-	  && r != 0)
+      if (rs_shadow.type == SEP_MLR && fin->end[-1] == '\n')
       {
-	 (*len_p)-- ;
-	 *--fin->buffp = 0 ;
+          /* multi line terminator
+             last record was terminated with only one '\n'
+	     make the single '\n' the last record terminator
+	  */
+	  *len_p -= 1 ;
       }
-      return p ;
+      return rec_start ;
    }
 
-   if (p == fin->buff)
+   if (rec_start == fin->buff)
    {
       /* current record is too big for the input buffer, grow buffer */
-      p = enlarge_fin_buffer(fin) ;
+      rec_start = enlarge_fin_buffer(fin) ;
    }
    else
    {
-      /* move a partial line to front of buffer and try again */
-      unsigned rr ;
+      /* move a partial line to front of buffer and try again
+         the partial line starts at rec_start and ends at fin->end */
 
-      p = (char *) memcpy(fin->buff, p, r = strlen(p)) ;
-      q = p+r ;	 rr = fin->nbuffs*BUFFSZ - r ;
+      size_t partial_sz = fin->end - rec_start ;
+      size_t fillsz = fin->buffsz - partial_sz ;
+      size_t actual_fillsz ;
 
-      if ((r = fillbuff(fin->fd, q, rr)) < rr)
-	 fin->flags |= EOF_FLAG ;
+      /* the man pages say memcpy might not work here, probably BS but ...*/
+      memmove(fin->buff, rec_start, partial_sz) ;
+      rec_start = fin->buff ;
+
+      actual_fillsz = fillbuff(fin->fd,fin->buff+partial_sz,fillsz) ;
+      fin->end = fin->buff + partial_sz + actual_fillsz ;
+
+      if (actual_fillsz < fillsz) {
+          fin->flags |= EOF_FLAG ;
+      }
    }
    goto retry ;
 }
 
+
+#define  K256    (1024*256)
+/* double buffer size up to 256K, then grow by 256K */
+
 static char *
-enlarge_fin_buffer(fin)
-   FIN *fin ;
+enlarge_fin_buffer(FIN* fin)
 {
-   unsigned r ;
-   unsigned oldsize = fin->nbuffs * BUFFSZ + 1 ;
+   size_t r ;
+   size_t oldsize = fin->buffsz ;
+   size_t newsize = oldsize < K256 ? 2*oldsize : oldsize + K256 ;
+   size_t delta = newsize - oldsize ;
 
-#ifdef  MSDOS
-   /* I'm not sure this can really happen:
-     avoid "16bit wrap" */
-   if (fin->nbuffs == MAX_BUFFS)
-   {
-      errmsg(0, "out of input buffer space") ;
-      mawk_exit(2) ;
-   }
-#endif
+   fin->start =
+      fin->buff = (char *) erealloc(fin->buff, newsize) ;
+   fin->buffsz = newsize ;
 
-   fin->buffp =
-      fin->buff = (char *) zrealloc(fin->buff, oldsize, oldsize + BUFFSZ) ;
-   fin->nbuffs++ ;
-
-   r = fillbuff(fin->fd, fin->buff + (oldsize - 1), BUFFSZ) ;
-   if (r < BUFFSZ)  fin->flags |= EOF_FLAG ;
+   r = fillbuff(fin->fd, fin->buff + oldsize, delta) ;
+   if (r < delta)  fin->flags |= EOF_FLAG ;
+   fin->end = fin->buff + oldsize + r ;
 
    return fin->buff ;
 }
 
 /*--------
-  target is big enough to hold size + 1 chars
-  on exit the back of the target is zero terminated
+  target is big enough to hold size chars
+  terminates if read error
+
+  Note a return of less than size indicates EOF
  *--------------*/
-unsigned
-fillbuff(fd, target, size)
-   int fd ;
-   register char *target ;
-   unsigned size ;
+size_t
+fillbuff(int fd, char* target, size_t size)
 {
-   register int r ;
-   unsigned entry_size = size ;
+    int r ;
+    size_t entry_size = size ;
 
-   while (size)
-      switch (r = read(fd, target, size))
-      {
-	 case -1:
-	    errmsg(errno, "read error") ;
-	    mawk_exit(2) ;
+    while (size>0) {
+        switch (r = read(fd, target, size)) {
+	    case -1:
+	        errmsg(errno, "read error") ;
+	        mawk_exit(2) ;
 
-	 case 0:
-	    goto out ;
+	    case 0:
+	        goto out ;
 
-	 default:
-	    target += r ; size -= r ;
-	    break ;
-      }
-
+	    default:
+	        target += r ; size -= r ;
+	        break ;
+        }
+    }
 out :
-   *target = 0 ;
-   return entry_size - size ;
+    return entry_size - size ;
 }
 
 /* main_fin is a handle to the main input stream
@@ -404,7 +372,7 @@ static double argi = 1.0 ;	 /* index of next ARGV[argi] to try to open */
 
 
 static void
-set_main_to_stdin()
+set_main_to_stdin(void)
 {
    cell_destroy(FILENAME) ;
    FILENAME->type = C_STRING ;
@@ -421,7 +389,7 @@ set_main_to_stdin()
    unless there is a getline inside BEGIN {}
 */
 void
-open_main()
+open_main(void)
 {
    CELL argc ;
 
@@ -440,9 +408,9 @@ open_main()
 }
 
 /* get the next command line file open */
-static FIN *
-next_main(open_flag)
-   int open_flag ;		 /* called by open_main() if on */
+FIN *
+next_main(int open_flag)
+    /* called by open_main() if open_flag is on  */
 {
    register CELL *cp ;
    CELL argc ;			 /* copy of ARGC */
@@ -480,7 +448,7 @@ next_main(open_flag)
 
       /* try to open it -- we used to continue on failure,
        but posix says we should quit */
-      if (!(main_fin = FINopen(string(cp)->str, 1)))  
+      if (!(main_fin = FINopen(string(cp)->str, 1)))
       {
          errmsg(errno, "cannot open %s", string(cp)->str) ;
 	 mawk_exit(2) ;
@@ -511,8 +479,7 @@ next_main(open_flag)
       /* this is how we mark EOF on main_fin  */
       static char dead_buff = 0 ;
       static FIN dead_main =
-      {0, (FILE *) 0, &dead_buff, &dead_buff,
-       1, EOF_FLAG} ;
+      {0, (FILE *) 0, &dead_buff, &dead_buff, &dead_buff, 0, EOF_FLAG} ;
 
       return main_fin = &dead_main ;
       /* since MAIN_FLAG is not set, FINgets won't call next_main() */
@@ -521,13 +488,12 @@ next_main(open_flag)
 
 
 int
-is_cmdline_assign(s)
-   char *s ;
+is_cmdline_assign(char* s)
 {
-   register char *p ;
+   char *p ;
    int c ;
    SYMTAB *stp ;
-   CELL *cp ;
+   CELL *cp = 0 ;
    unsigned len ;
    CELL cell ;			 /* used if command line assign to pseudo field */
    CELL *fp = (CELL *) 0 ;	 /* ditto */
@@ -572,9 +538,12 @@ is_cmdline_assign(s)
    /* we need to keep ARGV[i] intact */
    *p++ = '=' ;
    len = strlen(p) + 1 ;
-   /* posix says escape sequences are on from command line */
-   p = rm_escape(strcpy((char *) zmalloc(len), p)) ;
-   cp->ptr = (PTR) new_STRING(p) ;
+   p = strcpy((char *) zmalloc(len), p) ;
+   {
+       /* posix says escape sequences are on from command line */
+       size_t rlen = rm_escape(p) ;
+       cp->ptr = new_STRING2(p,rlen) ;
+   }
    zfree(p, len) ;
    check_strnum(cp) ;		 /* sets cp->type */
    if (fp)			/* move it from cell to pfield[] */

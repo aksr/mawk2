@@ -1,50 +1,41 @@
 
 /********************************************
 makescan.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: makescan.c,v $
- * Revision 1.3  1993/07/17  13:23:01  mike
- * indent and general code cleanup
- *
- * Revision 1.2	 1993/07/15  13:26:59  mike
- * SIZE_T and indent
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:16  mike
- * move source to cvs
- *
- * Revision 5.1	 1991/12/05  07:56:16  brennan
- * 1.1 pre-release
- *
-*/
 
 /* source for makescan.exe which builds the scancode[]
    via:	  makescan.exe > scancode.c
 */
 
+#include <string.h>
 
 #define	 MAKESCAN
 
 #include  "scan.h"
 
-char scan_code[256] ;
+int scan_code[256] ;
 
 void
-scan_init()
+scan_init(void)
 {
-   register char *p ;
+   int *p ;
 
-   memset(scan_code, SC_UNEXPECTED, sizeof(scan_code)) ;
-   for (p = scan_code + '0'; p <= scan_code + '9'; p++)
-      *p = SC_DIGIT ;
-   scan_code[0] = 0 ;
+   for(p = scan_code+1; p < scan_code+256; p++) {
+       *p = SC_UNEXPECTED ;
+   }
+   for (p = scan_code + '0'; p <= scan_code + '9'; p++) *p = SC_DIGIT ;
+
    scan_code[' '] = scan_code['\t'] = scan_code['\f'] = SC_SPACE ;
    scan_code['\r'] = scan_code['\013'] = SC_SPACE ;
 
@@ -85,14 +76,16 @@ scan_init()
 }
 
 void
-scan_print()
+scan_print(const char* date)
 {
-   register char *p = scan_code ;
+   register int *p = scan_code ;
    register int c ;		 /* column */
    register int r ;		 /* row */
 
-   printf("\n\n/* scancode.c */\n\n\n") ;
-   printf("char scan_code[256] = {\n") ;
+   printf("\n\n/* scancode.c */\n") ;
+   printf("/* generated from makescan.c */\n") ;
+   printf("/* %s */\n\n\n", date) ;
+   printf("int scan_code[256] = {\n") ;
 
    for (r = 1; r <= 16; r++)
    {
@@ -107,13 +100,24 @@ scan_print()
    printf("} ;\n") ;
 }
 
+char dbuff[128] ;
+const char*  get_date(void)
+{
+    FILE* fp = popen("/bin/date", "r") ;
+    if (fp) {
+	char* p ;
+        fgets(dbuff,128,fp) ;
+	if (p = strchr(dbuff,'\n')) *p = 0 ;
+	pclose(fp) ;
+    }
+    return dbuff ;
+}
+
 
 int
-main(argc, argv)
-   int argc ;
-   char **argv ;
+main(void)
 {
    scan_init() ;
-   scan_print() ;
+   scan_print(get_date()) ;
    return 0 ;
 }

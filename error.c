@@ -1,121 +1,82 @@
 
 /********************************************
 error.c
-copyright 1991, 1992 Michael D. Brennan
+copyright 1991, 1992,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
 
-/* $Log: error.c,v $
- * Revision 1.6  1995/06/06  00:18:22  mike
- * change mawk_exit(1) to mawk_exit(2)
- *
- * Revision 1.5  1994/12/13  00:26:33  mike
- * rt_nr and rt_fnr for run-time error messages
- *
- * Revision 1.4  1994/09/23  00:20:00  mike
- * minor bug fix: handle \ in eat_nl()
- *
- * Revision 1.3  1993/07/17  13:22:49  mike
- * indent and general code cleanup
- *
- * Revision 1.2  1993/07/04  12:51:44  mike
- * start on autoconfig changes
- *
- * Revision 1.1.1.1  1993/07/03  18:58:11  mike
- * move source to cvs
- *
- * Revision 5.3  1993/01/22  14:55:46  mike
- * trivial change for unexpected_char()
- *
- * Revision 5.2  1992/10/02  23:26:04  mike
- * using vargs.h
- *
- * Revision 5.1  1991/12/05  07:55:48  brennan
- * 1.1 pre-release
- *
-*/
 
-
+#include <stdarg.h>
 #include  "mawk.h"
 #include  "scan.h"
 #include  "bi_vars.h"
-#include  "vargs.h"
 
-
-#ifndef  EOF
-#define  EOF  (-1)
-#endif
-
-static void  PROTO( rt_where, (void) ) ;
-static void  PROTO( missing, (int, char *, int) ) ;
-static char *PROTO( type_to_str, (int) ) ;
-
-
-#ifdef  NO_VFPRINTF
-#define  vfprintf  simple_vfprintf
-#endif
+static void  rt_where(void) ;
+static void  missing(int, const char *, int) ;
+static const char* type_to_str(int) ;
 
 
 /* for run time error messages only */
 unsigned rt_nr , rt_fnr ;
 
 static struct token_str  {
-short token ;
-char *str ; }  token_str[] = {
-EOF , "end of file" ,
-NL , "end of line",
-SEMI_COLON , ";" ,
-LBRACE , "{" ,
-RBRACE , "}" ,
-SC_FAKE_SEMI_COLON, "}",
-LPAREN , "(" ,
-RPAREN , ")" ,
-LBOX , "[",
-RBOX , "]",
-QMARK , "?",
-COLON , ":",
-OR, "||",
-AND, "&&",
-ASSIGN , "=" ,
-ADD_ASG, "+=",
-SUB_ASG, "-=",
-MUL_ASG, "*=",
-DIV_ASG, "/=",
-MOD_ASG, "%=",
-POW_ASG, "^=",
-EQ  , "==" ,
-NEQ , "!=",
-LT, "<" ,
-LTE, "<=" ,
-GT, ">",
-GTE, ">=" ,
-MATCH, string_buff,
-PLUS , "+" ,
-MINUS, "-" ,
-MUL , "*" ,
-DIV, "/"  , 
-MOD, "%" ,
-POW, "^" ,
-NOT, "!" ,
-COMMA, "," ,
-INC_or_DEC , string_buff ,
-DOUBLE  , string_buff ,
-STRING_  , string_buff ,
-ID  , string_buff ,
-FUNCT_ID  , string_buff ,
-BUILTIN  , string_buff ,
-IO_OUT , string_buff ,
-IO_IN, "<" ,
-PIPE, "|" ,
-DOLLAR, "$" ,
-FIELD, "$" ,
-0, (char *) 0 } ;
+    int token ;
+    const char *str ;
+}  token_str[] = {
+    { EOF , "end of file" },
+    { NL , "end of line"},
+    { SEMI_COLON , ";" },
+    { LBRACE , "{" },
+    { RBRACE , "}" },
+    { SC_FAKE_SEMI_COLON, "}"},
+    { LPAREN , "(" },
+    { RPAREN , ")" },
+    { LBOX , "["},
+    { RBOX , "]"},
+    { QMARK , "?"},
+    { COLON , ":"},
+    { OR, "||"},
+    { AND, "&&"},
+    { ASSIGN , "=" },
+    { ADD_ASG, "+="},
+    { SUB_ASG, "-="},
+    { MUL_ASG, "*="},
+    { DIV_ASG, "/="},
+    { MOD_ASG, "%="},
+    { POW_ASG, "^="},
+    { EQ  , "==" },
+    { NEQ , "!="},
+    { LT, "<" },
+    { LTE, "<=" },
+    { GT, ">"},
+    { GTE, ">=" },
+    { PLUS , "+" },
+    { MINUS, "-" },
+    { MUL , "*" },
+    { DIV, "/"  },
+    { MOD, "%" },
+    { POW, "^" },
+    { NOT, "!" },
+    { COMMA, "," },
+    { IO_IN, "<" },
+    { PIPE, "|" },
+    { DOLLAR, "$" },
+    { FIELD, "$" },
+    { 0, 0}
+} ;
+
+static int token_in_string_buff[] = {
+    MATCH, INC_or_DEC , DOUBLE  , STRING_  , ID  , FUNCT_ID  ,
+    BUILTIN  , IO_OUT , 0 } ;
 
 /* if paren_cnt >0 and we see one of these, we are missing a ')' */
 static int missing_rparen[] =
@@ -125,32 +86,44 @@ static int missing_rparen[] =
 static int missing_rbrace[] =
 { EOF, BEGIN, END , 0 } ;
 
-static void missing( c, n , ln)
-  int c ;
-  char *n ;
-  int ln ;
-{ char *s0, *s1 ;
+static void missing(int c, const char* n , int ln)
+{ const char *s0, *s1 ;
 
   if ( pfile_name )
   { s0 = pfile_name ; s1 = ": " ; }
   else s0 = s1 = "" ;
 
-  errmsg(0, "%s%sline %u: missing %c near %s" ,s0, s1, ln, c, n) ; 
-}  
+  errmsg(0, "%s%sline %u: missing %c near %s" ,s0, s1, ln, c, n) ;
+}
 
-void  yyerror(s)
-  char *s ; /* we won't use s as input 
+void  yyerror(const char* s)
+  /* we don't use s for input,
   (yacc and bison force this).
-  We will use s for storage to keep lint or the compiler
-  off our back */
-{ struct token_str *p ;
+  We use s as a var to keep the compiler off our back */
+{
+  struct token_str *p ;
   int *ip ;
 
-  s = (char *) 0 ;
+  s =  0 ;
 
-  for ( p = token_str ; p->token ; p++ )
-      if ( current_token == p->token )
-      { s = p->str ; break ; }
+  for ( p = token_str ; p->token ; p++ ) {
+      if (current_token == p->token ) {
+          s = p->str ;
+	  break ;
+      }
+  }
+
+  if (!s) {
+      unsigned i = 0 ;
+      int tok ;
+      while((tok = token_in_string_buff[i])) {
+          if (current_token == tok) {
+	      s = string_buff ;
+	      break ; /* while */
+	  }
+	  i++ ;
+      }
+  }
 
   if ( ! s )  /* search the keywords */
          s = find_kw_str(current_token) ;
@@ -180,7 +153,7 @@ void  yyerror(s)
   switch ( current_token )
   {
     case UNEXPECTED :
-            unexpected_char() ; 
+            unexpected_char() ;
             goto done ;
 
     case BAD_DECIMAL :
@@ -191,7 +164,7 @@ void  yyerror(s)
 
     case RE :
             compile_error(
-            "syntax error at or near /%s/", 
+            "syntax error at or near /%s/",
             string_buff ) ;
             break ;
 
@@ -206,91 +179,129 @@ done :
 }
 
 
-/* generic error message with a hook into the system error 
+/* generic error message with a hook into the system error
    messages if errnum > 0 */
 
-void  errmsg VA_ALIST2(int , errnum, char *, format)
-  va_list args ;
+void  errmsg (int errnum, const char * format,...)
+{
+    va_list args ;
+    fprintf(stderr, "%s: " , progname) ;
+    va_start(args, format) ;
+    vfprintf(stderr, format, args) ;
+    va_end(args) ;
 
-  fprintf(stderr, "%s: " , progname) ;
+    if ( errnum > 0 ) fprintf(stderr, " (%s)" , strerror(errnum) ) ;
 
-  VA_START2(args, int, errnum, char *, format) ;
-  vfprintf(stderr, format, args) ;
-  va_end(args) ;
-
-  if ( errnum > 0 ) fprintf(stderr, " (%s)" , strerror(errnum) ) ;
-
-  fprintf( stderr, "\n") ;
+    fprintf( stderr, "\n") ;
+    fflush(stderr) ;
 }
 
-void  compile_error  VA_ALIST(char *, format)
-  va_list args ;
-  char *s0, *s1 ;
+void  compile_error(const char* format, ...)
+{
+    va_list args ;
+    const char* s0;
+    const char* s1;
 
-  /* with multiple program files put program name in
-     error message */
-  if ( pfile_name )
-  { s0 = pfile_name ; s1 = ": " ; }
-  else
-  { s0 = s1 = "" ; }
+    /* with multiple program files put program name in
+       error message */
+    if ( pfile_name ) {
+        s0 = pfile_name ;
+	s1 = ": " ;
+    }
+    else {
+        s0 = s1 = "" ;
+    }
 
-  fprintf(stderr, "%s: %s%sline %u: " , progname, s0, s1,token_lineno) ;
-  VA_START(args, char *, format) ;
-  vfprintf(stderr, format, args) ;
-  va_end(args) ;
-  fprintf(stderr, "\n") ;
-  if ( ++compile_error_count == MAX_COMPILE_ERRORS ) mawk_exit(2) ;
+    fprintf(stderr, "%s: %s%sline %u: " , progname, s0, s1,token_lineno) ;
+    va_start(args, format) ;
+    vfprintf(stderr, format, args) ;
+    va_end(args) ;
+    fprintf(stderr, "\n") ;
+    fflush(stderr) ;
+    if ( ++compile_error_count == MAX_COMPILE_ERRORS ) mawk_exit(2) ;
 }
 
-void  rt_error VA_ALIST( char *, format)
-  va_list args ;
+void  call_error(unsigned lineno, const char* format, ...)
+{
+    va_list args ;
+    const char* s0 = pfile_name ;
+    const char* s1 = ": " ;
 
-  fprintf(stderr, "%s: run time error: " , progname ) ;
-  VA_START(args, char *, format) ;
-  vfprintf(stderr, format, args) ;
-  va_end(args) ;
-  putc('\n',stderr) ;
-  rt_where() ;
-  mawk_exit(2) ;
+    if (!pfile_name) {
+        s0 = s1 = "" ;
+    }
+
+    fprintf(stderr, "%s: %s%sline %u: " , progname, s0, s1,lineno) ;
+    va_start(args, format) ;
+    vfprintf(stderr, format, args) ;
+    va_end(args) ;
+    fprintf(stderr, "\n") ;
+    fflush(stderr) ;
+    if (++compile_error_count == MAX_COMPILE_ERRORS) mawk_exit(2) ;
 }
 
+void  rt_error( const char * format, ...)
+{
+    va_list args ;
 
-void bozo(s)
-  char *s ;
-{ 
-  errmsg(0, "bozo: %s" , s) ; 
-  mawk_exit(3) ;
+    fprintf(stderr, "%s: run time error: " , progname ) ;
+    va_start(args, format) ;
+    vfprintf(stderr, format, args) ;
+    va_end(args) ;
+    fputc('\n',stderr) ;
+    rt_where() ;
+    mawk_exit(2) ;
 }
 
-void overflow(s, size)
-  char *s ; unsigned size ;
-{ 
-  errmsg(0 , "program limit exceeded: %s size=%u", s, size) ;
-  mawk_exit(2) ; 
+void compile_or_rt_error(const char* format, ...)
+{
+    /* up to caller not to exceed this buffer */
+    char buffer[1024] ;
+    va_list args ;
+
+    va_start(args,format) ;
+    vsprintf(buffer, format, args) ;
+    if (mawk_state == EXECUTION) {
+        rt_error(buffer) ;
+    }
+    else {
+        compile_error(buffer) ;
+    }
+}
+
+void bozo(const char* s)
+{
+    errmsg(0, "bozo: %s" , s) ;
+    mawk_exit(3) ;
+}
+
+void overflow(const char* s, unsigned size)
+{
+    errmsg(0 , "program limit exceeded: %s size=%u", s, size) ;
+    mawk_exit(2) ;
 }
 
 
 /* print as much as we know about where a rt error occured */
 
-static void rt_where()
+static void rt_where(void)
 {
   if ( FILENAME->type != C_STRING ) cast1_to_s(FILENAME) ;
 
-  fprintf(stderr, "\tFILENAME=\"%s\" FNR=%u NR=%u\n", 
+  fprintf(stderr, "\tFILENAME=\"%s\" FNR=%u NR=%u\n",
     string(FILENAME)->str, rt_fnr, rt_nr) ;
 }
 
 /* run time */
-void rt_overflow(s, size)
-  char *s ; unsigned size ;
-{ 
-  errmsg(0 , "program limit exceeded: %s size=%u", s, size) ;
-  rt_where() ;
-  mawk_exit(2) ;
+void rt_overflow(const char* s, unsigned size)
+{
+    errmsg(0 , "program limit exceeded: %s size=%u", s, size) ;
+    rt_where() ;
+    mawk_exit(2) ;
 }
 
-void 
-unexpected_char()
+void
+unexpected_char(void)
 { int c = yylval.ival ;
 
   fprintf(stderr, "%s: %u: ", progname, token_lineno) ;
@@ -300,98 +311,39 @@ unexpected_char()
       fprintf(stderr, "unexpected character 0x%02x\n" , c) ;
 }
 
-static char *type_to_str( type )
-  int type ;
-{ char *retval ;
+static const char*
+type_to_str( int type )
+{
+    const char *retval ;
 
-  switch( type )
-  {
-    case  ST_VAR :  retval = "variable" ; break ;
-    case  ST_ARRAY :  retval = "array" ; break ;
-    case  ST_FUNCT :  retval = "function" ; break ;
-    case  ST_LOCAL_VAR : retval = "local variable" ; break ;
-    case  ST_LOCAL_ARRAY : retval = "local array" ; break ;
-    default : bozo("type_to_str") ;
-  }
-  return retval ;
+    switch( type ) {
+	case  ST_VAR :
+	    retval = "variable" ;
+	    break ;
+	case  ST_ARRAY :
+	    retval = "array" ;
+	    break ;
+	case  ST_FUNCT :
+	    retval = "function" ;
+	    break ;
+	case  ST_LOCAL_VAR :
+	    retval = "local variable" ;
+	    break ;
+	case  ST_LOCAL_ARRAY :
+	    retval = "local array" ;
+	    break ;
+	default :
+	    bozo("type_to_str") ;
+	    /* not reached */
+	    retval = 0 ;
+      }
+      return retval ;
 }
 
 /* emit an error message about a type clash */
-void type_error(p)
-  SYMTAB *p ;
-{ compile_error("illegal reference to %s %s", 
-    type_to_str(p->type) , p->name) ;
+void type_error(SYMTAB* p)
+{
+    compile_error("illegal reference to %s %s",
+        type_to_str(p->type) , p->name) ;
 }
-
-
-
-#ifdef  NO_VFPRINTF
-
-/* a minimal vfprintf  */
-int simple_vfprintf( fp, format, argp)
-  FILE *fp ;
-  char *format ; 
-  va_list  argp ;
-{ 
-  char *q , *p, *t ;
-  int l_flag ;
-  char xbuff[64] ;
-
-  q = format ;
-  xbuff[0] = '%' ;
-
-  while ( *q != 0 )
-  { 
-    if ( *q != '%' )
-    {
-      putc(*q, fp) ; q++ ; continue ;
-    }
-
-    /* mark the start with p */
-    p = ++q ;  t = xbuff + 1 ;
-
-    if ( *q == '-' )  *t++ = *q++ ;
-    while ( scan_code[*(unsigned char*)q] == SC_DIGIT ) *t++ = *q++ ;
-    if ( *q == '.' )
-    { *t++ = *q++ ;
-      while ( scan_code[*(unsigned char*)q] == SC_DIGIT ) *t++ = *q++ ;
-    }
-
-    if ( *q == 'l' )  { l_flag = 1 ; *t++ = *q++ ; }
-    else l_flag = 0 ;
-
-    
-    *t = *q++ ; t[1] = 0 ;
-
-    switch( *t )
-    {
-      case 'c' :  
-      case 'd' :
-      case 'o' :
-      case 'x' :
-      case 'u' :
-           if ( l_flag )  fprintf(fp, xbuff, va_arg(argp,long) ) ;
-           else  fprintf(fp, xbuff, va_arg(argp, int)) ;
-           break ;
-
-      case  's' :
-           fprintf(fp, xbuff, va_arg(argp, char*)) ;
-           break ;
-
-      case  'g' :
-      case  'f' :
-           fprintf(fp, xbuff, va_arg(argp, double)) ;
-           break ;
-
-      default:
-           putc('%', fp) ; 
-           q = p ;
-           break ;
-    }
-  }
-  return 0 ; /* shut up */
-}
-
-#endif  /* USE_SIMPLE_VFPRINTF */
-
 

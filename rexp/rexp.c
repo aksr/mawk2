@@ -1,46 +1,18 @@
 
 /********************************************
 rexp.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: rexp.c,v $
- *Revision 1.3  1996/09/02 18:47:36  mike
- *Make ^* and ^+ syntax errors.
- *
- *Revision 1.2  1993/07/23 13:21:32  mike
- *cleanup rexp code
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:26  mike
- * move source to cvs
- *
- * Revision 3.4	 1991/08/13  09:09:59  brennan
- * VERSION .9994
- *
- * Revision 3.3	 91/08/04  15:45:03  brennan
- * no longer attempt to recover mem on failed REcompile
- * Its not worth the effort
- *
- * Revision 3.2	 91/08/03  07:24:06  brennan
- * check for empty machine stack (missing operand) wasn't quite right
- *
- * Revision 3.1	 91/06/07  10:33:16  brennan
- * VERSION 0.995
- *
- * Revision 1.7	 91/06/05  08:58:47  brennan
- * change RE_free to free
- *
- * Revision 1.6	 91/06/03  07:07:17  brennan
- * moved parser stacks inside REcompile
- * removed unnecessary copying
- *
-*/
 
 /*  op precedence  parser for regular expressions  */
 
@@ -49,14 +21,14 @@ the GNU General Public License, version 2, 1991.
 
 /*  DATA   */
 int REerrno ;
-char *REerrlist[] =
-{(char *) 0,
+const char* const REerrlist[] =
+{(const char *) 0,
  /* 1  */ "missing '('",
  /* 2  */ "missing ')'",
  /* 3  */ "bad class -- [], [^] or [",
  /* 4  */ "missing operand",
  /* 5  */ "resource exhaustion -- regular expression too large" ,
- /* 6  */ "syntax error ^* or ^+"
+ /* 6  */ "invalid named character class [:  :]"
 } ;
 /* E5 is very unlikely to occur */
 
@@ -65,14 +37,14 @@ char *REerrlist[] =
 static  short  table[8][8]  =  {
 
 /*        0   |   CAT   *   +   ?   (   )   */
-/* 0 */   0,  L,  L,    L,  L,  L,  L,  E1,
-/* | */   G,  G,  L,    L,  L,  L,  L,  G,
-/* CAT*/  G,  G,  G,    L,  L,  L,  L,  G,
-/* * */   G,  G,  G,    G,  G,  G, E7,  G,
-/* + */   G,  G,  G,    G,  G,  G, E7,  G,
-/* ? */   G,  G,  G,    G,  G,  G, E7,  G,
-/* ( */   E2, L,  L,    L,  L,  L,  L,  EQ,
-/* ) */   G , G,  G,    G,  G,  G,  E7,  G     }   ;
+/* 0 */   {0,  L,  L,    L,  L,  L,  L,  E1},
+/* | */   {G,  G,  L,    L,  L,  L,  L,  G},
+/* CAT*/  {G,  G,  G,    L,  L,  L,  L,  G},
+/* * */   {G,  G,  G,    G,  G,  G, E7,  G},
+/* + */   {G,  G,  G,    G,  G,  G, E7,  G},
+/* ? */   {G,  G,  G,    G,  G,  G, E7,  G},
+/* ( */   {E2, L,  L,    L,  L,  L,  L,  EQ},
+/* ) */   {G , G,  G,    G,  G,  G,  E7,  G}     }   ;
 
 
 #define	 STACKSZ   64
@@ -81,8 +53,7 @@ static  short  table[8][8]  =  {
 static jmp_buf err_buf ;	 /*  used to trap on error */
 
 void
-RE_error_trap(x)
-   int x ;
+RE_error_trap(int x)
 {
    REerrno = x ;
    longjmp(err_buf, 1) ;
@@ -90,8 +61,7 @@ RE_error_trap(x)
 
 
 PTR
-REcompile(re)
-   char *re ;
+REcompile(const char* re, size_t re_len)
 {
    MACHINE m_stack[STACKSZ] ;
    struct op
@@ -106,9 +76,9 @@ REcompile(re)
 
    /* do this first because it also checks if we have a
      run time stack */
-   RE_lex_init(re) ;
+   RE_lex_init(re, re_len) ;
 
-   if (*re == 0)
+   if (re_len == 0)
    {
       STATE *p = (STATE *) RE_malloc(sizeof(STATE)) ;
       p->type = M_ACCEPT ;
@@ -137,15 +107,21 @@ REcompile(re)
 	 case T_START:
 	 case T_END:
 	 case T_CLASS:
-	    m_ptr++ ; 
+	    m_ptr++ ;
 	    break ;
 
 	 case 0:		/*  end of reg expr   */
 	    if (op_ptr->token == 0)
 	    {
 	       /*  done	  */
-	       if (m_ptr == m_stack)  return (PTR) m_ptr->start ;
-	       else  
+	       if (m_ptr == m_stack)  {
+	           /* if M_WAIT at end, replace with M_ACCEPT */
+		   if ((m_ptr->stop -1)->type == M_WAIT) {
+			(m_ptr->stop - 1)->type = M_ACCEPT ;
+		   }
+	           return (PTR) m_ptr->start ;
+	       }
+	       else
 	       {
 		  /* machines still on the stack  */
 		  RE_panic("values still on machine stack") ;
@@ -230,8 +206,7 @@ REcompile(re)
 
 /* getting here means a logic flaw or unforeseen case */
 void
-RE_panic(s)
-   char *s ;
+RE_panic(const char *s)
 {
    fprintf(stderr, "REcompile() - panic:  %s\n", s) ;
    exit(100) ;

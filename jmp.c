@@ -1,38 +1,18 @@
 
 /********************************************
 jmp.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/* $Log: jmp.c,v $
- * Revision 1.4  1995/06/18  19:42:19  mike
- * Remove some redundant declarations and add some prototypes
- *
- * Revision 1.3  1995/04/21  14:20:16  mike
- * move_level variable to fix bug in arglist patching of moved code.
- *
- * Revision 1.2  1993/07/14  13:17:49  mike
- * rm SIZE_T and run thru indent
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:15  mike
- * move source to cvs
- *
- * Revision 5.3	 1993/01/09  19:03:44  mike
- * code_pop checks if the resolve_list needs relocation
- *
- * Revision 5.2	 1993/01/07  02:50:33  mike
- * relative vs absolute code
- *
- * Revision 5.1	 1991/12/05  07:56:10  brennan
- * 1.1 pre-release
- *
-*/
 
 /* this module deals with back patching jumps, breaks and continues,
    and with save and restoring code when we move code.
@@ -65,9 +45,7 @@ JMP ;
 static JMP *jmp_top ;
 
 void
-code_jmp(jtype, target)
-   int jtype ;
-   INST *target ;
+code_jmp(int jtype, INST* target)
 {
    if (error_state)  return ;
 
@@ -88,8 +66,7 @@ code_jmp(jtype, target)
 }
 
 void
-patch_jmp(target)		/* patch a jump on the jmp_stack */
-   INST *target ;
+patch_jmp(INST* target)		/* patch a jump on the jmp_stack */
 {
    register JMP *p ;
    register INST *source ;	 /* jmp starts here */
@@ -130,8 +107,7 @@ BC_new()			/* mark the start of a loop */
 }
 
 void
-BC_insert(type, address)
-int type ; INST *address ;
+BC_insert(int type, INST* address)
 {
    register BC *p ;
 
@@ -157,8 +133,7 @@ int type ; INST *address ;
 
 /* patch all break and continues for one loop */
 void
-BC_clear(B_address, C_address)
-   INST *B_address, *C_address ;
+BC_clear(INST* B_address, INST* C_address)
 {
    register BC *p, *q ;
    INST *source ;
@@ -205,11 +180,11 @@ int code_move_level = 0 ; /* see comment in jmp.h */
  /* means relocation of resolve list not needed */
 
 void
-code_push(code, len, scope, fbp)
-   INST *code ;
-   unsigned len ;
-   int scope ;
-   FBLOCK *fbp ;
+code_push(
+   INST *code ,
+   unsigned len ,
+   int scope ,
+   FBLOCK *fbp )
 {
    register MC *p ;
 
@@ -231,7 +206,7 @@ code_push(code, len, scope, fbp)
 	 p->scope = scope ;
 	 p->move_level = code_move_level ;
 	 p->fbp = fbp ;
-	 p->offset = code - code_base ;
+	 p->offset = (code == 0) ? 0 : code - code_base ;
       }
    }
    code_move_level++ ;
@@ -241,8 +216,7 @@ code_push(code, len, scope, fbp)
    return the number of INSTs moved */
 
 unsigned
-code_pop(target)
-   INST *target ;
+code_pop(INST* target)
 {
    register MC *p ;
    unsigned len ;

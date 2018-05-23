@@ -1,30 +1,17 @@
 
 /********************************************
 hash.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
-
-
-/* $Log: hash.c,v $
- * Revision 1.3  1994/10/08  19:15:43  mike
- * remove SM_DOS
- *
- * Revision 1.2  1993/07/16  00:17:35  mike
- * cleanup
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:14  mike
- * move source to cvs
- *
- * Revision 5.1	 1991/12/05  07:56:05  brennan
- * 1.1 pre-release
- *
-*/
 
 
 /* hash.c */
@@ -33,15 +20,35 @@ the GNU General Public License, version 2, 1991.
 #include "memory.h"
 #include "symtype.h"
 
+/*
+ * FNV-1a hash function
+ * http://www.isthe.com/chongo/tech/comp/fnv/index.html
+ */
+unsigned
+hash(const char *s)
+{
+    /* FNV-1a */
+    register unsigned h = 2166136261U;
+
+    while (*s) {
+	h ^= (unsigned char) (*s++);
+	h *= 16777619U;
+    }
+    return h;
+}
 
 unsigned
-hash(s)
-   register char *s ;
+hash2(const char *s, size_t len)
 {
-   register unsigned h = 0 ;
+    /* FNV-1a */
+    register unsigned h = 2166136261U;
 
-   while (*s)  h += h + *s++ ;
-   return h ;
+    while (len > 0) {
+	h ^= (unsigned char) (*s++);
+	h *= 16777619U;
+	len-- ;
+    }
+    return h;
 }
 
 typedef struct hash
@@ -50,7 +57,11 @@ typedef struct hash
    SYMTAB symtab ;
 } HASHNODE ;
 
-static HASHNODE *PROTO(delete, (char *)) ;
+#if defined(__cplusplus)
+#define delete delete_
+#endif
+
+static HASHNODE *delete(const char *) ;
 
 static HASHNODE *hash_table[HASH_PRIME] ;
 
@@ -61,8 +72,7 @@ Caller knows the symbol is not there
 */
 
 SYMTAB *
-insert(s)
-   char *s ;
+insert(const char* s)
 {
    register HASHNODE *p = ZMALLOC(HASHNODE) ;
    register unsigned h ;
@@ -77,8 +87,7 @@ insert(s)
    if not there insert it,  s must be dup'ed  */
 
 SYMTAB *
-find(s)
-   char *s ;
+find(const char* s)
 {
    register HASHNODE *p ;
    HASHNODE *q ;
@@ -92,7 +101,7 @@ find(s)
       {
 	 p = ZMALLOC(HASHNODE) ;
 	 p->symtab.type = ST_NONE ;
-	 p->symtab.name = strcpy(zmalloc(strlen(s) + 1), s) ;
+	 p->symtab.name = strcpy((char *)zmalloc(strlen(s) + 1), s) ;
 	 break ;
       }
 
@@ -102,7 +111,7 @@ find(s)
 	    return &p->symtab ;
 	 else  /* delete from the list */
 	 {
-	    q->link = p->link ;	 break ; 
+	    q->link = p->link ;	 break ;
 	 }
       }
 
@@ -121,8 +130,7 @@ find(s)
 static unsigned last_hash ;
 
 static HASHNODE *
-delete(s)
-   char *s ;
+delete(const char* s)
 {
    register HASHNODE *p ;
    HASHNODE *q = (HASHNODE *) 0 ;
@@ -139,7 +147,7 @@ delete(s)
       }
       else
       {
-	 q = p ; p = p->link ; 
+	 q = p ; p = p->link ;
       }
    }
 
@@ -157,8 +165,7 @@ static HASHNODE *save_list ;
 /* store a global id on the save list,
    return a ptr to the local symtab  */
 SYMTAB *
-save_id(s)
-   char *s ;
+save_id(const char* s)
 {
    HASHNODE *p, *q ;
    unsigned h ;
@@ -179,7 +186,7 @@ save_id(s)
 
 /* restore all global indentifiers */
 void
-restore_ids()
+restore_ids(void)
 {
    register HASHNODE *p, *q ;
    register unsigned h ;
@@ -199,15 +206,12 @@ restore_ids()
    disassembler.  This is slow -- so what
 */
 
-
-char *
-reverse_find(type, ptr)
-   int type ;
-   PTR ptr ;
+const char *
+reverse_find(int type, void*  ptr)
 {
-   CELL *cp ;
-   ARRAY array ;
-   static char uk[] = "unknown" ;
+   CELL *cp = 0 ;
+   ARRAY array = 0 ;
+   const char* const uk = "unknown" ;
 
    int i ;
    HASHNODE *p ;

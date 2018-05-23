@@ -1,60 +1,45 @@
 
 /********************************************
 rexp.h
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-/*$Log: rexp.h,v $
- * Revision 1.2  1993/07/23  13:21:35  mike
- * cleanup rexp code
- *
- * Revision 1.1.1.1  1993/07/03  18:58:27  mike
- * move source to cvs
- *
- * Revision 3.6  1992/01/21  17:31:45  brennan
- * moved ison() macro out of rexp[23].c
- *
- * Revision 3.5  91/10/29  10:53:55  brennan
- * SIZE_T
- * 
- * Revision 3.4  91/08/13  09:10:02  brennan
- * VERSION .9994
- * 
- * Revision 3.3  91/06/15  09:40:25  brennan
- * gcc defines __STDC__ but might not have stdlib.h
- * 
- * Revision 3.2  91/06/10  16:18:19  brennan
- * changes for V7
- * 
- * Revision 3.1  91/06/07  10:33:18  brennan
- * VERSION 0.995
- * 
- * Revision 1.3  91/06/05  08:57:57  brennan
- * removed RE_xmalloc()
- * 
- * Revision 1.2  91/06/03  07:23:26  brennan
- * changed type of RE_error_trap
- * 
- * Revision 1.1  91/06/03  07:05:41  brennan
- * Initial revision
- * 
-*/
 
 #ifndef  REXP_H
 #define  REXP_H
 
-#include "nstd.h"
+
+typedef void* PTR ;
+
+#include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdint.h>
 #include  <setjmp.h>
 
-PTR  PROTO( RE_malloc, (unsigned) ) ;
-PTR  PROTO( RE_realloc, (void *,unsigned) ) ;
+typedef int Bool ;
+PTR   REcompile(const char *,size_t)  ;
+int   REtest (const char *, size_t len, PTR)  ;
+char *REmatch(const char *, size_t, PTR, size_t*, Bool)  ;
+void  REmprint(PTR , FILE*) ;
+int   REempty(PTR) ;
+
+extern  int  REerrno ;
+extern  const char* const REerrlist[] ;
+
+
+
+PTR  RE_malloc(size_t) ;
+PTR  RE_realloc(void *,size_t) ;
 
 
 /*  finite machine  state types  */
@@ -68,23 +53,24 @@ PTR  PROTO( RE_realloc, (void *,unsigned) ) ;
 #define  M_1J      	6
 #define  M_2JA     	7
 #define  M_2JB     	8
-#define  M_ACCEPT  	9
-#define  U_ON      	10
+#define  M_WAIT         9
+#define  M_ACCEPT  	10
+#define  U_ON      	11
 
 #define  U_OFF     0
 #define  END_OFF   0
 #define  END_ON    (2*U_ON)
 
 
-typedef  unsigned char BV[32] ;  /* bit vector */
+typedef  uint32_t BV[8] ;  /* bit vector */
 
 typedef  struct
-{ char type ;
-  unsigned char  len ;  /* used for M_STR  */
+{ int type ;
+  size_t len ;  /* used for M_STR  */
   union
-   { 
+   {
      char *str  ;  /* string */
-     BV   *bvp ;   /*  class  */
+     const BV* bvp ;   /*  class  */
      int   jump ;
    }  data ;
 }     STATE  ;
@@ -97,7 +83,7 @@ typedef  struct
 
 /*  tokens   */
 #define  T_OR   1       /* | */
-#define  T_CAT  2       
+#define  T_CAT  2
 #define  T_STAR 3       /* * */
 #define  T_PLUS 4       /* + */
 #define  T_Q    5       /* ? */
@@ -126,38 +112,38 @@ typedef  struct
 
 #define  MEMORY_FAILURE      5
 
-#define  ison(b,x)  ((b)[((unsigned char)(x))>>3] & (1<<((x)&7)))
+#define  ISON(b,x)  ((b)[((unsigned char)(x))>>5] & (1<<((x)&31)))
 
 /* struct for the run time stack */
 typedef struct {
 STATE *m ;   /*   save the machine ptr */
 int    u ;   /*   save the u_flag */
-char  *s ;   /*   save the active string ptr */
-char  *ss ;  /*   save the match start -- only used by REmatch */
+const char  *s ;   /*   save the active string ptr */
+const char  *ss ;  /*   save the match start -- only used by REmatch */
 } RT_STATE ;   /* run time state */
 
 /*  error  trap   */
 extern int REerrno ;
-void   PROTO(RE_error_trap, (int) ) ;
+void   RE_error_trap(int) ;
 
 
-MACHINE   PROTO( RE_u, (void) ) ;
-MACHINE   PROTO( RE_start, (void) ) ;
-MACHINE   PROTO( RE_end, (void) ) ;
-MACHINE   PROTO( RE_any, (void) ) ;
-MACHINE   PROTO( RE_str, (char *, unsigned) ) ;
-MACHINE   PROTO( RE_class, (BV *) ) ;
-void      PROTO( RE_cat, (MACHINE *, MACHINE *) ) ;
-void      PROTO( RE_or, (MACHINE *, MACHINE *) ) ;
-void      PROTO( RE_close, (MACHINE *) ) ;
-void      PROTO( RE_poscl, (MACHINE *) ) ;
-void      PROTO( RE_01, (MACHINE *) ) ;
-void      PROTO( RE_panic, (char *) ) ;
-char     *PROTO( str_str, (char *, char *, unsigned) ) ;
+MACHINE    RE_u(void) ;
+MACHINE    RE_start(void) ;
+MACHINE    RE_end(void) ;
+MACHINE    RE_any(void) ;
+MACHINE    RE_str(char *, size_t) ;
+MACHINE    RE_class(const BV *) ;
+void       RE_cat(MACHINE *, MACHINE *) ;
+void       RE_or(MACHINE *, MACHINE *) ;
+void       RE_close(MACHINE *) ;
+void       RE_poscl(MACHINE *) ;
+void       RE_01(MACHINE *) ;
+void       RE_panic(const char *) ;
+char*      str_str(const char *, size_t , const char *, size_t) ;
 
-void      PROTO( RE_lex_init , (char *) ) ;
-int       PROTO( RE_lex , (MACHINE *) ) ;
-void      PROTO( RE_run_stack_init, (void) ) ;
-RT_STATE *PROTO( RE_new_run_stack, (void) ) ;
+void       RE_lex_init (const char *,size_t) ;
+int        RE_lex (MACHINE *) ;
+void       RE_run_stack_init(void) ;
+RT_STATE * RE_new_run_stack(void) ;
 
 #endif   /* REXP_H  */

@@ -1,41 +1,16 @@
-
 /********************************************
 re_cmpl.c
-copyright 1991, Michael D. Brennan
+copyright 1991-1994,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
-********************************************/
+the GNU General Public License, version 3, 2007.
 
-/* $Log: re_cmpl.c,v $
- * Revision 1.6  1994/12/13  00:14:58  mike
- * \\ -> \ on second replacement scan
- *
- * Revision 1.5  1994/10/08  19:15:51  mike
- * remove SM_DOS
- *
- * Revision 1.4  1993/07/21  01:17:53  mike
- * handle "&" as replacement correctly
- *
- * Revision 1.3  1993/07/17  13:23:10  mike
- * indent and general code cleanup
- *
- * Revision 1.2  1993/07/15  23:38:23  mike
- * SIZE_T and indent
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:19  mike
- * move source to cvs
- *
- * Revision 5.2	 1993/01/01  21:30:48  mike
- * split new_STRING() into new_STRING and new_STRING0
- *
- * Revision 5.1	 1991/12/05  07:56:25  brennan
- * 1.1 pre-release
- *
-*/
+If you import elements of this code into another product,
+you agree to not name that product mawk.
+********************************************/
 
 
 /*  re_cmpl.c  */
@@ -45,371 +20,428 @@ the GNU General Public License, version 2, 1991.
 #include "scan.h"
 #include "regexp.h"
 #include "repl.h"
+#include "split.h"
 
-
-static CELL *PROTO(REPL_compile, (STRING *)) ;
-
-typedef struct re_node
-{
-   STRING *sval ;
-   PTR re ;
-   struct re_node *link ;
-} RE_NODE ;
+typedef struct re_node {
+    const STRING *sval;
+    PTR re;
+    struct re_node *link;
+} RE_NODE;
 
 /* a list of compiled regular expressions */
-static RE_NODE *re_list ;
+static RE_NODE *re_list;
 
-static char efmt[] = "regular expression compile failed (%s)\n%s" ;
+static char efmt[] = "regular expression compile failed (%s)\n%s";
 
 /* compile a STRING to a regular expression machine.
    Search a list of pre-compiled strings first
+
+   List uses move to the front.  Most reg expressions are compiled
+   at compile time, but some are compiled at run time.
+   This code:
+        BEGIN { var = ... }
+	$1 ~ var { .... }
+
+   would cause repeated compilation to an RE machine of the string in var.
+   So having that string near or at front of list is beneficial.
 */
 PTR
-re_compile(sval)
-   STRING *sval ;
+re_compile(const STRING * sval)
 {
-   register RE_NODE *p ;
-   RE_NODE *q ;
-   char *s ;
+    RE_NODE *p = re_list;
+    RE_NODE *q = 0;
 
-   /* search list */
-   s = sval->str ;
-   p = re_list ;
-   q = (RE_NODE *) 0 ;
-   while (p)
-   {
-      if (strcmp(s, p->sval->str) == 0) /* found */
-      {
-	 if (!q)		/* already at front */
-	    goto _return ;
-	 else  /* delete from list for move to front */
-	 {
-	    q->link = p->link ; goto found ; 
-	 }
+    while (p) {
+	if (STRING_eq(sval, p->sval)) {
+	    /* found */
+	    if (!q)		/* already at front */
+		goto _return;
+	    else {		/* delete from list for move to front */
+		q->link = p->link;
+		goto found;
+	    }
+	} else {
+	    q = p;
+	    p = p->link;
+	}
+    }
 
-      }
-      else
-      {
-	 q = p ; p = p->link ; 
-      }
-   }
+    /* not found */
+    {
+	PTR re = REcompile(sval->str, sval->len);
+	if (re == 0) {
+	    if (mawk_state == EXECUTION) {
+		rt_error(efmt,  REerrlist[REerrno], sval->str);
+	    } else {		/* compiling */
+		compile_error(efmt,  REerrlist[REerrno], sval->str);
+		return (PTR) 0;
+	    }
+	}
+	p = ZMALLOC(RE_NODE);
+	p->sval = STRING_dup(sval);
+	p->re = re;
+    }
 
-   /* not found */
-   p = ZMALLOC(RE_NODE) ;
-   p->sval = sval ;
+  found:
+    /* insert p at the front of the list */
+    p->link = re_list;
+    re_list = p;
 
-   sval->ref_cnt++ ;
-   if (!(p->re = REcompile(s)))
-   {
-      if (mawk_state == EXECUTION)
-	 rt_error(efmt, REerrlist[REerrno], s) ;
-      else  /* compiling */
-      {
-	 compile_error(efmt, REerrlist[REerrno], s) ;
-	 return (PTR) 0 ;
-      }
-   }
+  _return:
 
-
-found :
-/* insert p at the front of the list */
-   p->link = re_list ; re_list = p ;
-
-_return :
-
-#ifdef	DEBUG
-   if (dump_RE)	 REmprint(p->re, stderr) ;
+#ifdef DEBUG
+    if (dump_RE)
+	REmprint(p->re, stderr);
 #endif
-   return p->re ;
+    return p->re;
 }
-
-
 
 /* this is only used by da() */
 
-
-char *
-re_uncompile(m)
-   PTR m ;
+const STRING*
+re_uncompile(PTR m)
 {
-   register RE_NODE *p ;
+    register RE_NODE *p;
 
-   for (p = re_list; p; p = p->link)
-      if (p->re == m)  return p->sval->str ;
-#ifdef	DEBUG
-   bozo("non compiled machine") ;
+    for (p = re_list; p; p = p->link) {
+	if (p->re == m) {
+	    return p->sval ;
+	}
+    }
+#ifdef DEBUG
+    bozo("non compiled machine");
+#else
+    return 0 ;
 #endif
 }
-
-
 
 /*=================================================*/
 /*  replacement	 operations   */
 
-/* create a replacement CELL from a STRING *  */
+typedef struct repl_node {
+    struct repl_node *link;
+    const STRING *sval;		/* the input */
+    unsigned type;		/* C_REPL or C_REPLV */
+    void *ptr;			/* STRING* or Replv_Data* */
+} Repl_Node;
 
-static CELL *
-REPL_compile(sval)
-   STRING *sval ;
-{
-   int i = 0 ;
-   register char *p = sval->str ;
-   register char *q ;
-   char *xbuff ;
-   CELL *cp ;
+static Repl_Node *repl_list;
 
-   q = xbuff = (char *) zmalloc(sval->len + 1) ;
-
-   while (1)
-   {
-      switch (*p)
-      {
-	 case 0:
-	    *q = 0 ;
-	    goto done ;
-
-	 case '\\':
-	    if (p[1] == '&'|| p[1] == '\\')
-	    {
-	       *q++ = p[1] ;
-	       p += 2 ;
-	       continue ;
-	    }
-	    else  break ;
-
-	 case '&':
-	    /* if empty we don't need to make a node */
-	    if (q != xbuff)
-	    {
-	       *q = 0 ;
-	       split_buff[i++] = new_STRING(xbuff) ;
-	    }
-	    /* and a null node for the '&'  */
-	    split_buff[i++] = (STRING *) 0 ;
-	    /*	reset  */
-	    p++ ;  q = xbuff ;
-	    continue ;
-
-	 default:
-	    break ;
-      }
-
-      *q++ = *p++ ;
-   }
-
-done :
-   /* if we have one empty string it will get made now */
-   if (q > xbuff || i == 0)  split_buff[i++] = new_STRING(xbuff) ;
-
-   /* This will never happen */
-   if (i > MAX_SPLIT)  overflow("replacement pieces", MAX_SPLIT) ;
-
-   cp = ZMALLOC(CELL) ;
-   if (i == 1 && split_buff[0])
-   {
-      cp->type = C_REPL ;
-      cp->ptr = (PTR) split_buff[0] ;
-   }
-   else
-   {
-      STRING **sp = (STRING **)
-      (cp->ptr = zmalloc(sizeof(STRING *) * i)) ;
-      int j = 0 ;
-
-      while (j < i)  *sp++ = split_buff[j++] ;
-
-      cp->type = C_REPLV ;
-      cp->vcnt = i ;
-   }
-   zfree(xbuff, sval->len + 1) ;
-   return cp ;
-}
-
-/* free memory used by a replacement CELL  */
-
-void
-repl_destroy(cp)
-   register CELL *cp ;
-{
-   register STRING **p ;
-   unsigned cnt ;
-
-   if (cp->type == C_REPL)  free_STRING(string(cp)) ;
-   else	 /* an C_REPLV	      */
-   {
-      p = (STRING **) cp->ptr ;
-      for (cnt = cp->vcnt; cnt; cnt--)
-      {
-	 if (*p)  free_STRING(*p) ;
-	 p++ ;
-      }
-      zfree(cp->ptr, cp->vcnt * sizeof(STRING *)) ;
-   }
-}
-
-/* copy a C_REPLV cell to another CELL */
-
-CELL *
-replv_cpy(target, source)
-   CELL *target, *source ;
-{
-   STRING **t, **s ;
-   unsigned cnt ;
-
-   target->type = C_REPLV ;
-   cnt = target->vcnt = source->vcnt ;
-   target->ptr = (PTR) zmalloc(cnt * sizeof(STRING *)) ;
-
-   t = (STRING **) target->ptr ;
-   s = (STRING **) source->ptr ;
-   while (cnt)
-   {
-      cnt-- ;
-      if ( *s ) (*s)->ref_cnt++ ;
-      *t++ = *s++ ;
-   }
-   return target ;
-}
-
-
-/* here's our old friend linked linear list with move to the front
-   for compilation of replacement CELLs	 */
-
-typedef struct repl_node
-{
-   struct repl_node *link ;
-   STRING *sval ;		 /* the input */
-   CELL *cp ;			 /* the output */
-} REPL_NODE ;
-
-static REPL_NODE *repl_list ;
-
-/* search the list (with move to the front) for a compiled
-   separator.
-   return a ptr to a CELL (C_REPL or C_REPLV)
+/*
+ *  For sub(/re/, "ab...",[opt var]),
+ *  the string "ab..." gets scanned for & and \
+ *  The results are stored in repl_list.
+ *
+ *  A string constant, e.g. "my&string", get scanned during
+ *  compilation.  As opposed to,
+ *
+ *       { gsub(/re/, myvar)
+ *         ....
+*        }
+*
+*   The contents of myvar are scanned at each execution, so if myvar
+*   doesn't change the scan can be looked up instead of redone.
+*
+*   Move to the front, pushes compile time scans to the back and
+*   run time scans are more to the front.
 */
 
-CELL *
-repl_compile(sval)
-   STRING *sval ;
+/* does the scan when lookup fails */
+static void do_replacement_scan(const STRING *, CELL *);
+
+/* does lookup with move to front. When lookup fails, calls
+ * do_replacement_scan()
+ *
+ *
+ * results are put in *cp which caller has destroyed if needed
+*/
+void
+replacement_scan(const STRING * sval, CELL *cp)
 {
-   register REPL_NODE *p ;
-   REPL_NODE *q ;
-   char *s ;
+    Repl_Node dummy;
+    Repl_Node *q = &dummy;
+    Repl_Node *p = repl_list;	/* q trails p for move to front */
+    dummy.link = p;
 
-   /* search the list */
-   s = sval->str ;
-   p = repl_list ;
-   q = (REPL_NODE *) 0 ;
-   while (p)
-   {
-      if (strcmp(s, p->sval->str) == 0) /* found */
-      {
-	 if (!q)		/* already at front */
-	    return p->cp ;
-	 else  /* delete from list for move to front */
-	 {
-	    q->link = p->link ;
-	    goto found ;
-	 }
-
-      }
-      else
-      {
-	 q = p ; p = p->link ; 
-      }
-   }
-
-   /* not found */
-   p = ZMALLOC(REPL_NODE) ;
-   p->sval = sval ;
-   sval->ref_cnt++ ;
-   p->cp = REPL_compile(sval) ;
-
-found :
-/* insert p at the front of the list */
-   p->link = repl_list ; repl_list = p ;
-   return p->cp ;
+    while (p) {
+	if (STRING_eq(sval, p->sval)) {
+	    /* found */
+	    if (p != repl_list) {
+		/* delete and move to front */
+		q->link = p->link;
+		p->link = repl_list;
+		repl_list = p;
+	    }
+	    cp->type = p->type;
+	    if (p->type == C_REPL) {
+		cp->ptr = STRING_dup(p->ptr);
+	    } else {
+		cp->ptr = p->ptr;
+	    }
+	    return;
+	} else {
+	    q = q->link;
+	    p = p->link;
+	}
+    }
+    /* not in list, have to really scan it */
+    do_replacement_scan(sval, cp);
+    p = (Repl_Node *)zmalloc(sizeof(Repl_Node));
+    p->sval = STRING_dup(sval);
+    p->type = cp->type;
+    if (cp->type == C_REPL) {
+	p->ptr = STRING_dup(cp->ptr);
+    } else {
+	p->ptr = cp->ptr;
+    }
+    /* insert at front of list */
+    p->link = repl_list;
+    repl_list = p;
 }
 
-/* return the string for a CELL or type REPL or REPLV,
-   this is only used by da()  */
+/* A CELL of type C_REPLV points at Replv_Data.
+ * Replv_Data is created here.
+*/
 
-
-char *
-repl_uncompile(cp)
-   CELL *cp ;
+static Replv_Data *
+create_replv_data(STRING ** pieces, unsigned cnt)
 {
-   register REPL_NODE *p = repl_list ;
+    unsigned i = 0;
+    Replv_Data *ret = (Replv_Data *) zmalloc(sizeof(Replv_Data));
+    ret->cnt = cnt;
+    ret->amp_cnt = 0;
+    ret->piece_len = 0;
+    ret->pieces = (STRING **) zmalloc(cnt * sizeof(STRING *));
+    for (; i < cnt; i++) {
+	ret->pieces[i] = pieces[i];
+	if (pieces[i] == 0) {
+	    ret->amp_cnt++;
+	} else {
+	    ret->piece_len += pieces[i]->len;
+	}
+    }
+    return ret;
+}
 
-   if (cp->type == C_REPL)
-   {
-      while (p)
-      {
-	 if (p->cp->type == C_REPL && p->cp->ptr == cp->ptr)
-	    return p->sval->str ;
-	 else  p = p->link ;
-      }
-   }
-   else
-   {
-      while (p)
-      {
-	 if (p->cp->type == C_REPLV &&
-	     memcmp(cp->ptr, p->cp->ptr, cp->vcnt * sizeof(STRING *))
-	     == 0)
-	    return p->sval->str ;
-	 else  p = p->link ;
-      }
-   }
-
-#if  DEBUG
-   bozo("unable to uncompile an repl") ;
+#ifdef MEM_CHECK
+static void
+destroy_replv_data(Replv_Data * p)
+{
+    unsigned i = 0;
+    for (; i < p->cnt; i++) {
+	if (p->pieces[i]) {
+	    free_STRING(p->pieces[i]);
+	}
+    }
+    zfree(p->pieces, p->cnt * sizeof(STRING *));
+    zfree(p, sizeof(Replv_Data));
+}
 #endif
+
+static void
+  do_replacement_scan_posix(const STRING *, CELL *);
+static void
+  do_replacement_scan_awk(const STRING *, CELL *);
+
+int posix_repl_scan_flag = 0;
+
+static void
+do_replacement_scan(const STRING * sval, CELL *cp)
+{
+    if (posix_repl_scan_flag) {
+	do_replacement_scan_posix(sval, cp);
+    } else {
+	do_replacement_scan_awk(sval, cp);
+    }
+}
+
+/*     \\  --> \
+       \&  --> literal &
+       &    is replaced by the matched string
+*/
+static void
+do_replacement_scan_posix(const STRING * sval, CELL *cp)
+{
+    const char *str = sval->str;
+    const char *str_end = str + sval->len;
+
+    /* handle usual case */
+    if (memchr(str, '&', sval->len) == 0 && memchr(str, '\\', sval->len) == 0) {
+	cp->type = C_REPL;
+	cp->ptr = STRING_dup(sval);
+    } else {
+	char *buffer = (char *) zmalloc(sval->len);
+	STRING **sbuff = (STRING **) zmalloc(sval->len * sizeof(STRING *));
+
+	unsigned idx = 0;	/* index into sbuff */
+	char *bp = buffer;	/* walks buffer */
+	const char *s = str;	/* walks str */
+
+	while (s < str_end) {
+	    if (*s == '&') {
+		if (bp > buffer) {
+		    /* stuff in front of & */
+		    sbuff[idx++] = new_STRING2(buffer, bp - buffer);
+		}
+		sbuff[idx++] = 0;	/* for the & */
+		s++;
+		/* got a piece, so reset bp */
+		bp = buffer;
+	    } else if (*s == '\\' && ((s[1] == '&' || s[1] == '\\'))) {
+		*bp++ = s[1];
+		s += 2;
+	    } else {
+		*bp++ = *s++;
+	    }
+	}
+	/* handle last piece */
+	if (bp > buffer) {
+	    sbuff[idx++] = new_STRING2(buffer, bp - buffer);
+	}
+
+	if (idx == 1 && sbuff[0] != 0) {
+	    cp->type = C_REPL;
+	    cp->ptr = sbuff[0];
+	} else {
+	    cp->type = C_REPLV;
+	    cp->ptr = create_replv_data(sbuff, idx);
+	}
+	zfree(buffer, sval->len);
+	zfree(sbuff, sval->len * sizeof(STRING *));
+    }
 }
 
 /*
-  convert a C_REPLV to	C_REPL
-     replacing the &s with sval
+      If the string has no &'s, then unchanged.
+      \\  --> \ only if the run ends in &
+      2*n+1 \'s followed by & becomes n \'s and literal &
+      2*n   \'s followd by & becomes n \'s and & that's replaced by match
+*/
+static void
+do_replacement_scan_awk(const STRING * sval, CELL *cp)
+{
+    const char *str = sval->str;
+    const char *str_end = str + sval->len;
+
+    /* handle usual case */
+    if (memchr(str, '&', sval->len) == 0) {
+	cp->type = C_REPL;
+	cp->ptr = STRING_dup(sval);
+    } else {
+	char *buffer = (char *) zmalloc(sval->len);
+	STRING **sbuff = (STRING **) zmalloc(sval->len * sizeof(STRING *));
+
+	unsigned idx = 0;	/* index into sbuff */
+	char *bp = buffer;	/* walks buffer */
+	const char *s = str;	/* walks str */
+
+	while (s < str_end) {
+	    if (*s == '&') {
+		if (bp > buffer) {
+		    /* stuff in front of & */
+		    sbuff[idx++] = new_STRING2(buffer, bp - buffer);
+		}
+		sbuff[idx++] = 0;	/* for the & */
+		s++;
+		/* got a piece, so reset bp */
+		bp = buffer;
+	    } else if (*s == '\\') {
+		/* find end of run of \ */
+		const char *q = s + 1;
+		while (q < str_end && *q == '\\') {
+		    q++;
+		}
+		if (q == str_end || *q != '&') {
+		    /* \'s do nothing */
+		    while (s < q) {
+			*bp++ = '\\';
+			s++;
+		    }
+		} else {
+		    /* \\ --> \ and \& --> literal & */
+		    while (s < q) {
+			*bp++ = s[1];
+			s += 2;
+		    }
+		}
+	    } else {
+		*bp++ = *s++;
+	    }
+	}
+	/* handle last piece */
+	if (bp > buffer) {
+	    sbuff[idx++] = new_STRING2(buffer, bp - buffer);
+	}
+
+	if (idx == 1 && sbuff[0] != 0) {
+	    cp->type = C_REPL;
+	    cp->ptr = sbuff[0];
+	} else {
+	    cp->type = C_REPLV;
+	    cp->ptr = create_replv_data(sbuff, idx);
+	}
+	zfree(buffer, sval->len);
+	zfree(sbuff, sval->len * sizeof(STRING *));
+    }
+}
+
+/* return the STRING* for a CELL of type REPL or REPLV,
+   This is only used by da()
 */
 
-CELL *
-replv_to_repl(cp, sval)
-CELL *cp ; STRING *sval ;
+const STRING *
+repl_unscan(CELL *cp)
 {
-   register STRING **p ;
-   STRING **sblock = (STRING **) cp->ptr ;
-   unsigned cnt, vcnt = cp->vcnt ;
-   unsigned len ;
-   char *target ;
-
-#ifdef	DEBUG
-   if (cp->type != C_REPLV)  bozo("not replv") ;
+    Repl_Node *p = repl_list;
+    while (p) {
+	if (p->ptr == cp->ptr) {
+	    return p->sval;
+	} else {
+	    p = p->link;
+	}
+    }
+#ifdef DEBUG
+    bozo("unable to uncompile an repl");
+#else
+    return 0;
 #endif
-
-   p = sblock ; cnt = vcnt ; len = 0 ;
-   while (cnt--)
-   {
-      if (*p)  len += (*p++)->len ;
-      else
-      {
-	 *p++ = sval ;
-	 sval->ref_cnt++ ;
-	 len += sval->len ;
-      }
-   }
-   cp->type = C_REPL ;
-   cp->ptr = (PTR) new_STRING0(len) ;
-
-   p = sblock ; cnt = vcnt ; target = string(cp)->str ;
-   while (cnt--)
-   {
-      memcpy(target, (*p)->str, (*p)->len) ;
-      target += (*p)->len ;
-      free_STRING(*p) ;
-      p++ ;
-   }
-
-   zfree(sblock, vcnt * sizeof(STRING *)) ;
-   return cp ;
 }
+
+#ifdef MEM_CHECK
+
+static void
+free_RE_NODE(RE_NODE * p)
+{
+    free_STRING((STRING*)p->sval);
+    /*REdestroy(p->re);*/
+    zfree(p, sizeof(RE_NODE));
+}
+
+static void
+free_Repl_Node(Repl_Node * p)
+{
+    free_STRING((STRING *) p->sval);
+    if (p->type == C_REPL) {
+	free_STRING((STRING *) p->ptr);
+    } else {
+	destroy_replv_data((Replv_Data *) p->ptr);
+    }
+    zfree(p, sizeof(Repl_Node));
+}
+
+void
+free_re_repl_list(void)
+{
+    while (re_list != 0) {
+	RE_NODE *next = re_list->link;
+	free_RE_NODE(re_list);
+	re_list = next;
+    }
+
+    while (repl_list != 0) {
+	Repl_Node *next = repl_list->link;
+	free_Repl_Node(repl_list);
+	repl_list = next;
+    }
+}
+#endif

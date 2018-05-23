@@ -1,52 +1,19 @@
 
 /********************************************
 fcall.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
 
-/*$Log: fcall.c,v $
- * Revision 1.7  1995/08/27  15:46:47  mike
- * change some errmsgs to compile_errors
- *
- * Revision 1.6  1995/06/09  22:58:24  mike
- * cast to shutup solaris cc on comparison of short to ushort
- *
- * Revision 1.5  1995/06/06  00:18:26  mike
- * change mawk_exit(1) to mawk_exit(2)
- *
- * Revision 1.4  1995/04/21  14:20:14  mike
- * move_level variable to fix bug in arglist patching of moved code.
- *
- * Revision 1.3  1995/02/19  22:15:37  mike
- * Always set the call_offset field in a CA_REC (for obscure
- * reasons in fcall.c (see comments) there.)
- *
- * Revision 1.2  1993/07/17  13:22:52  mike
- * indent and general code cleanup
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:11  mike
- * move source to cvs
- *
- * Revision 5.4	 1993/01/09  19:03:44  mike
- * code_pop checks if the resolve_list needs relocation
- *
- * Revision 5.3	 1993/01/07  02:50:33  mike
- * relative vs absolute code
- *
- * Revision 5.2	 1993/01/01  21:30:48  mike
- * split new_STRING() into new_STRING and new_STRING0
- *
- * Revision 5.1	 1991/12/05  07:55:54  brennan
- * 1.1 pre-release
- *
-*/
 
 #include "mawk.h"
 #include "symtype.h"
@@ -56,11 +23,10 @@ the GNU General Public License, version 2, 1991.
    function calls
 */
 
-static FCALL_REC *PROTO(first_pass, (FCALL_REC *)) ;
-static CA_REC *PROTO(call_arg_check, (FBLOCK *, CA_REC *,
-				      INST *, unsigned)) ;
-static int PROTO(arg_cnt_ok, (FBLOCK *, CA_REC *, unsigned)) ;
-static void PROTO(relocate_arglist, (CA_REC *, int, unsigned, int)) ;
+static FCALL_REC * first_pass(FCALL_REC *) ;
+static CA_REC* call_arg_check(FBLOCK *, CA_REC *, INST *, unsigned) ;
+static int  arg_cnt_ok(FBLOCK *, CA_REC *, unsigned) ;
+static void  relocate_arglist(CA_REC *, int, unsigned, int) ;
 
 
 static int check_progress ;
@@ -71,11 +37,11 @@ static int check_progress ;
    returns a list of arguments whose type is still unknown
 */
 static CA_REC *
-call_arg_check(callee, entry_list, start, line_no)
-   FBLOCK *callee ;
-   CA_REC *entry_list ;
-   INST *start ;		 /* to locate patch */
-   unsigned line_no ;		 /* for error messages */
+call_arg_check(
+   FBLOCK *callee ,
+   CA_REC *entry_list ,
+   INST *start ,		 /* to locate patch */
+   unsigned line_no )		 /* for error messages */
 {
    register CA_REC *q ;
    CA_REC *exit_list = (CA_REC *) 0 ;
@@ -85,8 +51,8 @@ call_arg_check(callee, entry_list, start, line_no)
    /* loop :
        take q off entry_list
        test it
-	   if OK  zfree(q)  else put on exit_list  */  
-   while (q = entry_list)
+	   if OK  zfree(q)  else put on exit_list  */
+   while ((q = entry_list))
    {
       entry_list = q->link ;
 
@@ -172,12 +138,13 @@ call_arg_check(callee, entry_list, start, line_no)
       }
       else  /* type known */
       {
-	 if (callee->typev[q->arg_num] == ST_LOCAL_NONE)
-	    callee->typev[q->arg_num] = q->type ;
-	 else if (q->type != callee->typev[q->arg_num])
-	    compile_error("type error in arg(%d) in call to %s",
-		     q->arg_num + 1, callee->name) ;
-
+	 if (callee->typev[q->arg_num] == ST_LOCAL_NONE) {
+	     callee->typev[q->arg_num] = q->type ;
+	 }
+	 else if (q->type != callee->typev[q->arg_num]) {
+	     call_error(line_no, "type error in arg(%d) in call to %s",
+	         q->arg_num + 1, callee->name) ;
+	 }
 	 ZFREE(q) ;
 	 check_progress = 1 ;
       }
@@ -188,15 +155,15 @@ call_arg_check(callee, entry_list, start, line_no)
 
 
 static int
-arg_cnt_ok(fbp, q, line_no)
-   FBLOCK *fbp ;
-   CA_REC *q ;
-   unsigned line_no ;
+arg_cnt_ok(
+   FBLOCK *fbp ,
+   CA_REC *q ,
+   unsigned line_no )
 {
    if ((int)q->arg_num >= (int)fbp->nargs)
    /* casts shutup stupid warning from solaris sun cc */
    {
-      compile_error("too many arguments in call to %s", fbp->name) ;
+      call_error(line_no, "too many arguments in call to %s", fbp->name) ;
       return 0 ;
    }
    else	 return 1 ;
@@ -216,8 +183,7 @@ FCALL_REC *resolve_list ;
 */
 
 static FCALL_REC *
-first_pass(p)
-   register FCALL_REC *p ;
+first_pass(FCALL_REC* p)
 {
    FCALL_REC dummy ;
    register FCALL_REC *q = &dummy ;	 /* trails p */
@@ -235,8 +201,8 @@ first_pass(p)
       }
       /* note p->arg_list starts with last argument */
       else if (!p->arg_list /* nothing to do */	 ||
-	       !p->arg_cnt_checked &&
-	       !arg_cnt_ok(p->callee, p->arg_list, p->line_no))
+	       (!p->arg_cnt_checked &&
+	       !arg_cnt_ok(p->callee, p->arg_list, p->line_no)))
       {
 	 q->link = p->link ;	 /* delete p */
 	 /* the ! arg_list case is not an error so free memory */
@@ -276,7 +242,7 @@ first_pass(p)
 */
 
 void
-resolve_fcalls()
+resolve_fcalls(void)
 {
    register FCALL_REC *p, *old_list, *new_list ;
    int progress ;		 /* a flag */
@@ -301,8 +267,8 @@ resolve_fcalls()
       p = old_list ;
       old_list = p->link ;
 
-      if (p->arg_list = call_arg_check(p->callee, p->arg_list,
-				       p->call_start, p->line_no))
+      if ((p->arg_list = call_arg_check(p->callee, p->arg_list,
+				       p->call_start, p->line_no)))
       {
 	 /* still have work to do , put on new_list   */
 	 progress |= check_progress ;
@@ -323,13 +289,13 @@ resolve_fcalls()
    but not defined), a node is added to the resolve list.
 */
 void
-check_fcall(callee, call_scope, move_level, call, arg_list, line_no)
-   FBLOCK *callee ;
-   int call_scope ;
-   int move_level ;
-   FBLOCK *call ;
-   CA_REC *arg_list ;
-   unsigned line_no ;
+check_fcall(
+   FBLOCK *callee ,
+   int call_scope ,
+   int move_level ,
+   FBLOCK *call ,
+   CA_REC *arg_list ,
+   unsigned line_no )
 {
    FCALL_REC *p ;
 
@@ -352,8 +318,8 @@ check_fcall(callee, call_scope, move_level, call, arg_list, line_no)
       /* usually arg_list disappears here and all is well
 	 otherwise add to resolve list */
 
-      if (arg_list = call_arg_check(callee, arg_list,
-				    code_base, line_no))
+      if ((arg_list = call_arg_check(callee, arg_list,
+				    code_base, line_no)))
       {
 	 p = ZMALLOC(FCALL_REC) ;
 	 p->callee = callee ;
@@ -376,13 +342,13 @@ check_fcall(callee, call_scope, move_level, call, arg_list, line_no)
 */
 
 void
-relocate_resolve_list(scope, move_level, fbp, orig_offset, len, delta)
-   int scope ;
-   int move_level ;
-   FBLOCK *fbp ;
-   int orig_offset ;
-   unsigned len ;
-   int delta ;			 /* relocation distance */
+relocate_resolve_list(
+   int scope ,
+   int move_level ,
+   FBLOCK *fbp ,
+   int orig_offset ,
+   unsigned len ,
+   int delta )			 /* relocation distance */
 {
    FCALL_REC *p = resolve_list ;
 
@@ -399,11 +365,11 @@ relocate_resolve_list(scope, move_level, fbp, orig_offset, len, delta)
 }
 
 static void
-relocate_arglist(arg_list, offset, len, delta)
-   CA_REC *arg_list ;
-   int offset ;
-   unsigned len ;
-   int delta ;
+relocate_arglist(
+   CA_REC *arg_list ,
+   int offset ,
+   unsigned len ,
+   int delta )
 {
    register CA_REC *p ;
 
@@ -426,8 +392,6 @@ relocate_arglist(arg_list, offset, len, delta)
    }
    while (p);
 }
-
-
 
 
 

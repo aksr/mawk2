@@ -1,7 +1,7 @@
 
 ####################################
 # This is a makefile for mawk,
-# an implementation of AWK (1988).
+# an implementation of AWK 
 ####################################
 #
 #
@@ -9,16 +9,11 @@
 CC = cc
 CFLAGS = -O  -DMAWK -I..
 
-O=rexp.o rexp0.o rexp1.o rexp2.o rexp3.o 
-DB=rexpdb.o
+O=rexp.o rexp0.o rexp1.o rexp2.o rexp3.o rexpdb.o wait.o
 
 all : $(O)
-	@cat </dev/null > .done
 
-debug : $(O) $(DB)
-	@cat </dev/null > .done
-
-$(O) : rexp.h
+$(O) : rexp.h wait.h
 
 clean :
-	rm -f *.o .done
+	rm -f *.o 

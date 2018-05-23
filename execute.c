@@ -1,99 +1,24 @@
 
 /********************************************
 execute.c
-copyright 1991-1996, Michael D. Brennan
+copyright 1991-1996,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
-********************************************/
+the GNU General Public License, version 3, 2007.
 
-/* $Log: execute.c,v $
- * Revision 1.13  1996/02/01  04:39:40  mike
- * dynamic array scheme
- *
- * Revision 1.12  1995/06/06  00:18:24  mike
- * change mawk_exit(1) to mawk_exit(2)
- *
- * Revision 1.11  1995/03/08  00:06:24  mike
- * add a pointer cast
- *
- * Revision 1.10  1994/12/13  00:12:10  mike
- * delete A statement to delete all of A at once
- *
- * Revision 1.9  1994/10/25  23:36:11  mike
- * clear aloop stack on _NEXT
- *
- * Revision 1.8  1994/10/08  19:15:35  mike
- * remove SM_DOS
- *
- * Revision 1.7  1993/12/30  19:10:03  mike
- * minor cleanup to _CALL
- *
- * Revision 1.6  1993/12/01  14:25:13  mike
- * reentrant array loops
- *
- * Revision 1.5  1993/07/22  00:04:08  mike
- * new op code _LJZ _LJNZ
- *
- * Revision 1.4  1993/07/14  12:18:21  mike
- * run thru indent
- *
- * Revision 1.3	 1993/07/14  11:50:17  mike
- * rm SIZE_T and void casts
- *
- * Revision 1.2	 1993/07/04  12:51:49  mike
- * start on autoconfig changes
- *
- * Revision 5.10  1993/02/13  21:57:22	mike
- * merge patch3
- *
- * Revision 5.9	 1993/01/07  02:50:33  mike
- * relative vs absolute code
- *
- * Revision 5.8	 1993/01/01  21:30:48  mike
- * split new_STRING() into new_STRING and new_STRING0
- *
- * Revision 5.7.1.1  1993/01/15	 03:33:39  mike
- * patch3: safer double to int conversion
- *
- * Revision 5.7	 1992/12/17  02:48:01  mike
- * 1.1.2d changes for DOS
- *
- * Revision 5.6	 1992/11/29  18:57:50  mike
- * field expressions convert to long so 16 bit and 32 bit
- * systems behave the same
- *
- * Revision 5.5	 1992/08/11  15:24:55  brennan
- * patch2: F_PUSHA and FE_PUSHA
- * If this is preparation for g?sub(r,s,$expr) or (++|--) on $expr,
- * then if expr > NF, make sure $expr is set to ""
- *
- * Revision 5.4	 1992/08/11  14:51:54  brennan
- * patch2:  $expr++ is numeric even if $expr is string.
- * I forgot to do this earlier when handling x++ case.
- *
- * Revision 5.3	 1992/07/08  17:03:30  brennan
- * patch 2
- * revert to version 1.0 comparisons, i.e.
- * page 44-45 of AWK book
- *
- * Revision 5.2	 1992/04/20  21:40:40  brennan
- * patch 2
- * x++ is numeric, even if x is string
- *
- * Revision 5.1	 1991/12/05  07:55:50  brennan
- * 1.1 pre-release
- *
-*/
+If you import elements of this code into another product,
+you agree to not name that product mawk.
+********************************************/
 
 
 #include "mawk.h"
 #include "code.h"
 #include "memory.h"
 #include "symtype.h"
+#include "int.h"
 #include "field.h"
 #include "bi_funct.h"
 #include "bi_vars.h"
@@ -102,8 +27,8 @@ the GNU General Public License, version 2, 1991.
 #include "fin.h"
 #include <math.h>
 
-static int PROTO(compare, (CELL *)) ;
-static int PROTO(d_to_index, (double)) ;
+static int compare(CELL *) ;
+static int d_to_index(double) ;
 
 #ifdef	 NOINFO_SIGFPE
 static char dz_msg[] = "division by zero" ;
@@ -111,7 +36,7 @@ static char dz_msg[] = "division by zero" ;
 #endif
 
 #ifdef	 DEBUG
-static void PROTO(eval_overflow, (void)) ;
+static void eval_overflow(void) ;
 
 #define	 inc_sp()   if( ++sp == eval_stack+EVAL_STACK_SIZE )\
 			 eval_overflow()
@@ -134,65 +59,51 @@ static CELL *stack_danger = eval_stack + DANGER ;
 
 #ifdef	DEBUG
 static void
-eval_overflow()
+eval_overflow(void)
 {
    overflow("eval stack", EVAL_STACK_SIZE) ;
 }
 #endif
 
-/* holds info for array loops (on a stack) */
-typedef struct aloop_state {
-   struct aloop_state *link ;
-   CELL *var ;  /* for(var in A) */
-   STRING **base ;
-   STRING **ptr ;
-   STRING **limit ;
-} ALOOP_STATE ;
 
 /* clean up aloop stack on next, return, exit */
-#define CLEAR_ALOOP_STACK() if(aloop_state){\
-	    clear_aloop_stack(aloop_state);\
-	    aloop_state=(ALOOP_STATE*)0;}else
+#define CLEAR_ALOOP_STACK() do{if(aloop_stack){\
+	    clear_aloop_stack(aloop_stack);\
+	    aloop_stack=0;}}while(0)
 
-static void clear_aloop_stack(top)
-   ALOOP_STATE *top ;
+
+static void clear_aloop_stack(ALoop* top)
 {
-   ALOOP_STATE *q ;
-
-   do {
-      while(top->ptr<top->limit) {
-	 free_STRING(*top->ptr) ;
-	 top->ptr++ ;
-      }
-      if (top->base < top->limit)
-	 zfree(top->base, (top->limit-top->base)*sizeof(STRING*)) ;
-      q = top ; top = q->link ;
-      ZFREE(q) ;
-   } while (top) ;
+    do {
+       ALoop* hold = top ;
+       top = top->link ;
+       aloop_free(hold) ;
+    }
+    while(top) ;
 }
-   
 
 static INST *restart_label ;	 /* control flow labels */
 INST *next_label ;
 static CELL tc ;		 /*useful temp */
+static CELL unused ;             /*unuseful rarely used temp */
 
 void
-execute(cdp, sp, fp)
-   register INST *cdp ;		 /* code ptr, start execution here */
-   register CELL *sp ;		 /* eval_stack pointer */
-   CELL *fp ;			 /* frame ptr into eval_stack for
-			   user defined functions */
+execute(
+   INST *cdp ,		 /* code ptr, start execution here */
+   register CELL *sp ,		 /* eval_stack pointer */
+   CELL *fp )			 /* frame ptr into eval_stack for
+			            user defined functions */
 {
    /* some useful temporaries */
    CELL *cp ;
    int t ;
 
-   /* save state for array loops via a stack */
-   ALOOP_STATE *aloop_state = (ALOOP_STATE*) 0 ;
+   /* stacks array loops for nesting */
+   ALoop* aloop_stack = 0 ;
 
    /* for moving the eval stack on deep recursion */
-   CELL *old_stack_base ;
-   CELL *old_sp ;
+   CELL *old_stack_base = 0 ;
+   CELL *old_sp = 0 ;
 
 #ifdef	DEBUG
    CELL *entry_sp = sp ;
@@ -234,7 +145,7 @@ execute(cdp, sp, fp)
 
 	 case _PUSHC:
 	    inc_sp() ;
-	    cellcpy(sp, cdp++->ptr) ;
+	    cellcpy(sp, (CELL *)(cdp++->ptr)) ;
 	    break ;
 
 	 case _PUSHD:
@@ -248,6 +159,11 @@ execute(cdp, sp, fp)
 	    sp->type = C_STRING ;
 	    sp->ptr = cdp++->ptr ;
 	    string(sp)->ref_cnt++ ;
+	    break ;
+
+	 case PUSHFM:
+	    inc_sp() ;
+	    sp->ptr = cdp++->ptr ;
 	    break ;
 
 	 case F_PUSHA:
@@ -288,7 +204,7 @@ execute(cdp, sp, fp)
 	 case _PUSHI:
 	    /* put contents of next address on stack*/
 	    inc_sp() ;
-	    cellcpy(sp, cdp++->ptr) ;
+	    cellcpy(sp, (CELL *)(cdp++->ptr)) ;
 	    break ;
 
 	 case L_PUSHI:
@@ -418,50 +334,96 @@ execute(cdp, sp, fp)
 	    sp->ptr = fp[cdp++->op].ptr ;
 	    break ;
 
+	 case PI_LOAD: /* load parameter info used for length(A) */
+	     /* when coded type of A was unknown, patch it now */
+	     {
+	         SYMTAB* stp = (SYMTAB*) cdp->ptr ;
+		 cdp-- ;
+		 switch(stp->type) {
+		     case ST_VAR:
+		         cdp[0].op = _PUSHI ;
+		         cdp[1].ptr = stp->stval.cp ;
+			 break ;
+		     case ST_ARRAY:
+		         cdp[0].op = A_PUSHA ;
+		         cdp[1].ptr = stp->stval.array ;
+		         /* cdp[2].op is _BUILTIN */
+		         cdp[3].ptr = (PTR)bi_alength ;
+			 break ;
+		     default :  /* ST_NONE is possible but weird */
+		         cdp[0].op = _PUSHI ;
+		         cdp[1].ptr = &unused ;
+			 break ;
+	          }
+	     }
+	     /* code just patched will execute now */
+	     break ;
+
+	 case LPI_LOAD: /* load local parameter info used for length(A) */
+	     /* when coded type of A was unknown, patch it now */
+	     {
+	         Local_PI* pi = (Local_PI*) cdp->ptr ;
+		 FBLOCK* fbp = pi->fbp ;
+		 unsigned offset = pi->offset ;
+		 int type = fbp->typev[offset] ;
+
+		 ZFREE(pi) ;
+		 cdp-- ;
+		 switch(type) {
+		     case ST_LOCAL_VAR:
+		         cdp[0].op = L_PUSHI ;
+		         cdp[1].op = offset ;
+			 break ;
+		     case ST_LOCAL_ARRAY:
+		         cdp[0].op = LA_PUSHA ;
+		         cdp[1].op = offset ;
+		         /* cdp[2].op is _BUILTIN */
+		         cdp[3].ptr = (PTR)bi_alength ;
+			 break ;
+		     default :  /* ST_LOCAL_NONE is possible but weird */
+		         cdp[0].op = _PUSHI ;
+		         cdp[1].ptr = &unused ;
+			 break ;
+	          }
+	     }
+	     /* code just patched will execute now */
+	     break ;
+
 	 case SET_ALOOP:
 	    {
-	       ALOOP_STATE *ap = ZMALLOC(ALOOP_STATE) ;
-	       unsigned vector_size ;
-
-	       ap->var = (CELL *) sp[-1].ptr ;
-	       ap->base = ap->ptr = array_loop_vector(
-			    (ARRAY)sp->ptr, &vector_size) ;
-	       ap->limit = ap->base + vector_size ;
+	        /* for (i in A)
+		   address of A is in sp[0]
+		   address of i is in sp[-1]
+		*/
+	       ALoop* al = make_aloop((ARRAY)sp[0].ptr,(CELL*)sp[-1].ptr) ;
 	       sp -= 2 ;
-
-	       /* push onto aloop stack */
-	       ap->link = aloop_state ;
-	       aloop_state = ap ;
+	       /* stack it for nesting */
+	       al->link = aloop_stack ;
+	       aloop_stack = al ;
 	       cdp += cdp->op ;
 	    }
 	    break ;
 
 	 case  ALOOP :
 	    {
-	       ALOOP_STATE *ap = aloop_state ;
-	       if (ap->ptr < ap->limit) 
-	       {
-		  cell_destroy(ap->var) ;
-		  ap->var->type = C_STRING ;
-		  ap->var->ptr = (PTR) *ap->ptr++ ;
-		  cdp += cdp->op ;
+	       ALoop* al = aloop_stack ;
+	       if (aloop_next(al)) {
+	           /* execute body of loop */
+		   cdp += cdp->op ;
 	       }
-	       else cdp++ ;
+	       else {
+	           /* loop is done */
+		   cdp++ ;
+	       }
 	    }
 	    break ;
-		  
+
 	 case  POP_AL :
-	    { 
+	    {
 	       /* finish up an array loop */
-	       ALOOP_STATE *ap = aloop_state ;
-               aloop_state = ap->link ;
-	       while(ap->ptr < ap->limit) {
-		  free_STRING(*ap->ptr) ;
-		  ap->ptr++ ;
-	       }
-	       if (ap->base < ap->limit)
-		  zfree(ap->base,(ap->limit-ap->base)*sizeof(STRING*)) ;
-               ZFREE(ap) ;
+	       ALoop* al = aloop_stack ;
+	       aloop_stack = al->link ;
+	       aloop_free(al) ;
             }
 	    break ;
 
@@ -479,7 +441,7 @@ execute(cdp, sp, fp)
 	    if (sp->type == C_MBSTRN)  check_strnum(sp) ;
 	    sp-- ;
 	    cell_destroy(((CELL *) sp->ptr)) ;
-	    cellcpy(sp, cellcpy(sp->ptr, sp + 1)) ;
+	    cellcpy(sp, cellcpy((CELL *)sp->ptr, (CELL *)(sp + 1))) ;
 	    cell_destroy(sp + 1) ;
 	    break ;
 
@@ -943,7 +905,7 @@ execute(cdp, sp, fp)
 	       cdp++ ;
 	    }
 	    break ;
-	       
+
 	 case _LJNZ:
 	    /* special jump for logical or */
 	    /* this is always preceded by _TEST */
@@ -1005,7 +967,7 @@ execute(cdp, sp, fp)
 	    if (field->type >= C_STRING)
 	    {
 	       sp->type = C_DOUBLE ;
-	       sp->dval = REtest(string(field)->str, cdp++->ptr)
+	       sp->dval = REtest(string(field)->str, string(field)->len, cdp++->ptr)
 		  ? 1.0 : 0.0 ;
 
 	       break /* the case */ ;
@@ -1019,7 +981,7 @@ execute(cdp, sp, fp)
 	 case _MATCH1:
 	    /* does expr at sp[0] match RE at cdp */
 	    if (sp->type < C_STRING)  cast1_to_s(sp) ;
-	    t = REtest(string(sp)->str, cdp++->ptr) ;
+	    t = REtest(string(sp)->str, string(sp)->len, cdp++->ptr) ;
 	    free_STRING(string(sp)) ;
 	    sp->type = C_DOUBLE ;
 	    sp->dval = t ? 1.0 : 0.0 ;
@@ -1031,7 +993,7 @@ execute(cdp, sp, fp)
 	    cast_to_RE(sp) ;
 
 	    if ((--sp)->type < C_STRING)  cast1_to_s(sp) ;
-	    t = REtest(string(sp)->str, (sp + 1)->ptr) ;
+	    t = REtest(string(sp)->str, string(sp)->len, (sp + 1)->ptr) ;
 
 	    free_STRING(string(sp)) ;
 	    sp->type = C_DOUBLE ;
@@ -1044,7 +1006,7 @@ execute(cdp, sp, fp)
 
 	   we compute	(expression in array)  */
 	    sp-- ;
-	    cp = array_find((sp + 1)->ptr, sp, NO_CREATE) ;
+	    cp = array_find((ARRAY)((sp + 1)->ptr), sp, NO_CREATE) ;
 	    cell_destroy(sp) ;
 	    sp->type = C_DOUBLE ;
 	    sp->dval = (cp != (CELL *) 0) ? 1.0 : 0.0 ;
@@ -1055,14 +1017,14 @@ execute(cdp, sp, fp)
 	   sp[-1] is an expr
 	   delete  array[expr]	*/
 
-	    array_delete(sp->ptr, sp - 1) ;
+	    array_delete((ARRAY)(sp->ptr), (CELL *)(sp - 1)) ;
 	    cell_destroy(sp - 1) ;
 	    sp -= 2 ;
 	    break ;
 
 	 case DEL_A:
 	    /* free all the array at once */
-	    array_clear(sp->ptr) ;
+	    array_clear((ARRAY)(sp->ptr)) ;
 	    sp-- ;
 	    break ;
 
@@ -1073,7 +1035,7 @@ execute(cdp, sp, fp)
 
 	 case _EXIT:
 	    if (sp->type != C_DOUBLE)  cast1_to_d(sp) ;
-	    exit_code = d_to_i(sp->dval) ;
+	    exit_code = d_to_int(sp->dval) ;
 	    sp-- ;
 	    /* fall thru */
 
@@ -1108,10 +1070,17 @@ execute(cdp, sp, fp)
 	    cdp = next_label ;
 	    break ;
 
+	 case _NEXTFILE:
+	    /* nextfile might be inside an aloop -- clear stack */
+	    CLEAR_ALOOP_STACK() ;
+	    next_main(0) ;
+	    cdp = next_label ;
+	    break ;
+
 	 case OL_GL:
 	    {
 	       char *p ;
-	       unsigned len ;
+	       size_t len ;
 
 	       if (!(p = FINgets(main_fin, &len)))
 	       {
@@ -1135,7 +1104,7 @@ execute(cdp, sp, fp)
 	 case OL_GL_NR:
 	    {
 	       char *p ;
-	       unsigned len ;
+	       size_t len ;
 
 	       if (!(p = FINgets(main_fin, &len)))
 	       {
@@ -1223,7 +1192,7 @@ execute(cdp, sp, fp)
 	    return ;
 
 	 case _CALL:
-	    
+
 	    /*  cdp[0] holds ptr to "function block"
 		cdp[1] holds number of input arguments
 	    */
@@ -1233,7 +1202,7 @@ execute(cdp, sp, fp)
 	       int a_args = cdp++->op ;	 /* actual number of args */
 	       CELL *nfp = sp - a_args + 1 ;	 /* new fp for callee */
 	       CELL *local_p = sp + 1 ;	 /* first local argument on stack */
-	       char *type_p ;	 /* pts to type of an argument */
+	       char *type_p = 0 ;	 /* pts to type of an argument */
 
 	       if (fbp->nargs)	type_p = fbp->typev + a_args - 1 ;
 
@@ -1259,9 +1228,9 @@ execute(cdp, sp, fp)
 		  {
 		     if (*type_p == ST_LOCAL_ARRAY)
 		     {
-			if (sp >= local_p)  
+			if (sp >= local_p)
 			{
-			   array_clear(sp->ptr) ;
+			   array_clear((ARRAY)(sp->ptr)) ;
 			   ZFREE((ARRAY)sp->ptr) ;
 			}
 		     }
@@ -1290,8 +1259,7 @@ execute(cdp, sp, fp)
   return 0 if a string is "" else return non-zero
 */
 int
-test(cp)
-   register CELL *cp ;
+test(CELL *cp)
 {
  reswitch:
 
@@ -1315,8 +1283,7 @@ test(cp)
    frees STRINGs at those cells
 */
 static int
-compare(cp)
-   register CELL *cp ;
+compare(CELL *cp)
 {
    int k ;
 
@@ -1335,7 +1302,7 @@ compare(cp)
       case TWO_STRINGS:
       case STRING_AND_STRNUM:
        two_s:
-	 k = strcmp(string(cp)->str, string(cp + 1)->str) ;
+	 k = STRING_cmp(string(cp), string(cp + 1)) ;
 	 free_STRING(string(cp)) ;
 	 free_STRING(string(cp + 1)) ;
 	 return k ;
@@ -1370,86 +1337,73 @@ compare(cp)
    call to cell_destroy	 */
 
 CELL *
-cellcpy(target, source)
-   register CELL *target, *source ;
+cellcpy(CELL *target, CELL *source)
 {
-   switch (target->type = source->type)
-   {
-      case C_NOINIT:
-      case C_SPACE:
-      case C_SNULL:
-	 break ;
+    switch (target->type = source->type) {
+    case C_NOINIT:
+    case C_SPACE:
+    case C_SNULL:
+	break;
 
-      case C_DOUBLE:
-	 target->dval = source->dval ;
-	 break ;
+    case C_DOUBLE:
+	target->dval = source->dval;
+	break;
 
-      case C_STRNUM:
-	 target->dval = source->dval ;
-	 /* fall thru */
+    case C_STRNUM:
+	target->dval = source->dval;
+	/* fall thru */
 
-      case C_REPL:
-      case C_MBSTRN:
-      case C_STRING:
-	 string(source)->ref_cnt++ ;
-	 /* fall thru */
+    case C_REPL:
+    case C_MBSTRN:
+    case C_STRING:
+	string(source)->ref_cnt++;
+	/* fall thru */
 
-      case C_RE:
-	 target->ptr = source->ptr ;
-	 break ;
-
-      case C_REPLV:
-	 replv_cpy(target, source) ;
-	 break ;
-
-      default:
-	 bozo("bad cell passed to cellcpy()") ;
-	 break ;
-   }
-   return target ;
+    case C_RE:
+    case C_REPLV:
+	target->ptr = source->ptr;
+	break;
+    default:
+	bozo("bad cell passed to cellcpy()");
+	break;
+    }
+    return target;
 }
 
 #ifdef	 DEBUG
 
 void
-DB_cell_destroy(cp)		/* HANGOVER time */
-   register CELL *cp ;
+DB_cell_destroy(CELL *cp)
 {
-   switch (cp->type)
-   {
-      case C_NOINIT:
-      case C_DOUBLE:
-	 break ;
+    switch (cp->type) {
+    case C_NOINIT:
+    case C_DOUBLE:
+	break;
 
-      case C_MBSTRN:
-      case C_STRING:
-      case C_STRNUM:
-	 if (--string(cp)->ref_cnt == 0)
-	    zfree(string(cp), string(cp)->len + STRING_OH) ;
-	 break ;
+    case C_MBSTRN:
+    case C_STRING:
+    case C_STRNUM:
+	free_STRING(string(cp));
+	break;
 
-      case C_RE:
-	 bozo("cell destroy called on RE cell") ;
-      default:
-	 bozo("cell destroy called on bad cell type") ;
-   }
+    case C_RE:
+	bozo("cell destroy called on RE cell");
+    default:
+	bozo("cell destroy called on bad cell type");
+    }
 }
 
 #endif
 
 
-
 /* convert a double d to a field index	$d -> $i */
 static int
-d_to_index(d)
-   double d;
+d_to_index(double d)
 {
 
-   if (d > MAX_FIELD)
-      rt_overflow("maximum number of fields", MAX_FIELD) ;
-
-   if (d >= 0.0)  return (int) d ;
-
+    if (d >= 0.0) {
+        return d_to_int(d) ;
+    }
    /* might include nan */
    rt_error("negative field index $%.6g", d) ;
    return 0 ;			 /* shutup */

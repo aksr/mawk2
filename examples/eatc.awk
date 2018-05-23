@@ -23,7 +23,7 @@ function eat_comment(s,		t)
   while ( (t = index(s, "*/")) == 0 )
 	if ( getline s == 0 )
 	{ # input error -- unterminated comment
-          system("/bin/sh -c 'echo unterminated comment' 1>&2")
+          system("echo unterminated comment 1>&2")
 	  exit 1
 	}
 

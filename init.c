@@ -1,67 +1,23 @@
 
 /********************************************
 init.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
 
-/* $Log: init.c,v $
- * Revision 1.11  1995/08/20  17:35:21  mike
- * include <stdlib.h> for MSC, needed for environ decl
- *
- * Revision 1.10  1995/06/09  22:51:50  mike
- * silently exit(0) if no program
- *
- * Revision 1.9  1995/06/06  00:18:30  mike
- * change mawk_exit(1) to mawk_exit(2)
- *
- * Revision 1.8  1994/12/14  14:40:34  mike
- * -Wi option
- *
- * Revision 1.7  1994/12/11  22:43:20  mike
- * don't assume **environ is writable
- *
- * Revision 1.6  1994/12/11  22:14:16  mike
- * remove THINK_C #defines.  Not a political statement, just no indication
- * that anyone ever used it.
- *
- * Revision 1.5  1994/10/08  19:15:45  mike
- * remove SM_DOS
- *
- * Revision 1.4  1994/03/11  02:23:49  mike
- * -We option
- *
- * Revision 1.3  1993/07/17  00:45:14  mike
- * indent
- *
- * Revision 1.2	 1993/07/04  12:52:00  mike
- * start on autoconfig changes
- *
- * Revision 5.5	 1993/01/07  02:50:33  mike
- * relative vs absolute code
- *
- * Revision 5.4	 1992/12/24  01:58:19  mike
- * 1.1.2d changes for MsDOS
- *
- * Revision 5.3	 1992/07/10  16:17:10  brennan
- * MsDOS: remove NO_BINMODE macro
- *
- * Revision 5.2	 1992/01/09  08:46:14  brennan
- * small change for MSC
- *
- * Revision 5.1	 91/12/05  07:56:07  brennan
- * 1.1 pre-release
- *
-*/
 
 
 /* init.c */
+#include <signal.h>
 #include "mawk.h"
 #include "code.h"
 #include "memory.h"
@@ -70,30 +26,26 @@ the GNU General Public License, version 2, 1991.
 #include "bi_vars.h"
 #include "field.h"
 
-#ifdef MSDOS
-#include <fcntl.h>
-#ifdef MSDOS_MSC
-#include <stdlib.h>
-#endif
-#endif
 
-static void PROTO(process_cmdline, (int, char **)) ;
-static void PROTO(set_ARGV, (int, char **, int)) ;
-static void PROTO(bad_option, (char *)) ;
-static void PROTO(no_program, (void)) ;
+static void  process_cmdline(int, char **) ;
+static void  set_ARGV(int, char **, int) ;
+static void  bad_option(const char *) ;
+static void  no_program(void) ;
+static void  print_help(void) ;
+static void  catch_fpe(int) ;
 
-extern void PROTO(print_version, (void)) ;
-extern int PROTO(is_cmdline_assign, (char *)) ;
+extern void  print_version(void) ;
+extern int  is_cmdline_assign(char *) ;
 
 #if  MSDOS
-void PROTO(stdout_init, (void)) ;
+void  stdout_init(void) ;
 #if  HAVE_REARGV
-void PROTO(reargv, (int *, char ***)) ;
+void  reargv(int *, char ***) ;
 #endif
 #endif
 
-char *progname ;
-short interactive_flag = 0 ;
+const char *progname ;
+int interactive_flag = 0 ;
 
 #ifndef	 SET_PROGNAME
 #define	 SET_PROGNAME() \
@@ -101,13 +53,22 @@ short interactive_flag = 0 ;
     progname = p ? p+1 : argv[0] ; }
 #endif
 
+
+static void
+buffer_init(void)
+{
+    string_buff = (char*) emalloc(SPRINTF_LIMIT) ;
+    string_buff_end = string_buff + SPRINTF_LIMIT ;
+}
+
+
 void
-initialize(argc, argv)
-int argc ; char **argv ;
+initialize(int argc, char** argv)
 {
 
    SET_PROGNAME() ;
 
+   buffer_init() ;
    bi_vars_init() ;		 /* load the builtin variables */
    bi_funct_init() ;		 /* load the builtin functions */
    kw_init() ;			 /* load the keywords */
@@ -125,8 +86,8 @@ int argc ; char **argv ;
    process_cmdline(argc, argv) ;
 
    code_init() ;
-   fpe_init() ;
-   set_stderr() ;
+   signal(SIGFPE, catch_fpe) ;
+   set_stdoutput() ;
 
 #if  MSDOS
    stdout_init() ;
@@ -134,30 +95,29 @@ int argc ; char **argv ;
 }
 
 int dump_code_flag ;		 /* if on dump internal code */
-short posix_space_flag ;
+int posix_space_flag ;
 
 #ifdef	 DEBUG
-int dump_RE ;			 /* if on dump compiled REs  */
+int dump_RE = 1 ;			 /* if on dump compiled REs  */
 #endif
 
-
 static void
-bad_option(s)
-   char *s ;
+bad_option(const char* s)
 {
-   errmsg(0, "not an option: %s", s) ; mawk_exit(2) ; 
+   errmsg(0, "not an option: %s", s) ; mawk_exit(2) ;
 }
 
 static void
-no_program()
+no_program(void)
 {
    mawk_exit(0) ;
 }
 
+#define optarg optarg_			/* remove conflict with optarg in <getopt.h> */
+
+
 static void
-process_cmdline(argc, argv)
-   int argc ;
-   char **argv ;
+process_cmdline(int argc, char** argv)
 {
    int i, nextarg ;
    char *optarg ;
@@ -172,6 +132,23 @@ process_cmdline(argc, argv)
 	 break ;		 /* the for loop */
       }
       /* safe to look at argv[i][2] */
+
+      /* handle two arguments that are now widely supported in most free and open-source software  */
+      if (strncmp(argv[i], "--v", 3) == 0 ||
+          strncmp(argv[i], "--V", 3) == 0)
+      {
+          /* --version  */
+	  print_version();
+	  /* no return */
+      }
+
+      if (strncmp(argv[i], "--h", 3) == 0 ||
+          strncmp(argv[i], "--H", 3) == 0)
+      {
+          /* --help */
+	  print_help();
+	  /* no return */
+      }
 
       if (argv[i][2] == 0)
       {
@@ -201,20 +178,14 @@ process_cmdline(argc, argv)
 	    if (optarg[0] >= 'a' && optarg[0] <= 'z')
 	       optarg[0] += 'A' - 'a' ;
 	    if (optarg[0] == 'V')  print_version() ;
+	    if (optarg[0] == 'H')  print_help() ;
 	    else if (optarg[0] == 'D')
 	    {
 	       dump_code_flag = 1 ;
 	    }
 	    else if (optarg[0] == 'S')
 	    {
-	       char *p = strchr(optarg, '=') ;
-	       int x = p ? atoi(p + 1) : 0 ;
-
-	       if (x > SPRINTF_SZ)
-	       {
-		  sprintf_buff = (char *) zmalloc(x) ;
-		  sprintf_limit = sprintf_buff + x ;
-	       }
+	       /* obsolete, silently ignore */
 	    }
 #if  MSDOS
 	    else if (optarg[0] == 'B')
@@ -228,6 +199,7 @@ process_cmdline(argc, argv)
 	    else if (optarg[0] == 'P')
 	    {
 	       posix_space_flag = 1 ;
+	       posix_repl_scan_flag = 1 ;
 	    }
 	    else if (optarg[0] == 'E')
 	    {
@@ -262,11 +234,14 @@ process_cmdline(argc, argv)
 
 	 case 'F':
 
-	    rm_escape(optarg) ;	 /* recognize escape sequences */
-	    cell_destroy(FS) ;
-	    FS->type = C_STRING ;
-	    FS->ptr = (PTR) new_STRING(optarg) ;
-	    cast_for_split(cellcpy(&fs_shadow, FS)) ;
+	    {
+	        /* recognize escape sequences */
+	        size_t len = rm_escape(optarg) ;
+	        cell_destroy(FS) ;
+	        FS->type = C_STRING ;
+	        FS->ptr =  new_STRING2(optarg,len) ;
+	        cast_for_split(cellcpy(&fs_shadow, FS)) ;
+	    }
 	    break ;
 
 	 case '-':
@@ -320,9 +295,8 @@ process_cmdline(argc, argv)
 
 
 static void
-set_ARGV(argc, argv, i)
-int argc ; char **argv ;
-   int i ;			 /* argv[i] = ARGV[i] */
+set_ARGV(int argc, char** argv, int i)
+   	 /* argv[i] = ARGV[i] */
 {
    SYMTAB *st_p ;
    CELL argi ;
@@ -335,7 +309,7 @@ int argc ; char **argv ;
    argi.dval = 0.0 ;
    cp = array_find(st_p->stval.array, &argi, CREATE) ;
    cp->type = C_STRING ;
-   cp->ptr = (PTR) new_STRING(progname) ;
+   cp->ptr = (PTR) new_STRING(argv[0]) ;
 
    /* ARGV[0] is set, do the rest
      The type of ARGV[1] ... should be C_MBSTRN
@@ -355,13 +329,10 @@ int argc ; char **argv ;
 /*----- ENVIRON ----------*/
 
 void
-load_environ(ENV)
-   ARRAY ENV ;
+load_environ(ARRAY ENV)
 {
    CELL c ;
-#ifndef	 MSDOS_MSC		/* MSC declares it near */
    extern char **environ ;
-#endif
    register char **p = environ ; /* walks environ */
    char *s ;			 /* looks for the '=' */
    CELL *cp ;			 /* pts at ENV[&c] */
@@ -370,7 +341,7 @@ load_environ(ENV)
 
    while (*p)
    {
-      if (s = strchr(*p, '='))	/* shouldn't fail */
+      if ((s = strchr(*p, '=')))	/* shouldn't fail */
       {
 	 int len = s - *p ;
 	 c.ptr = (PTR) new_STRING0(len) ;
@@ -385,4 +356,101 @@ load_environ(ENV)
       }
       p++ ;
    }
+}
+
+
+/*  FPE exceptions
+
+mawk 1.x.x  in 199x tried hard to catch fpe when necessary,
+      have optimal settings and
+      maximize information passed to user
+
+      What to do in 201x?
+
+      Odds of fpe in an awk program is verrrrrrrrrry small
+      probablity it generates an INF or NAN is at least .9
+          probably higher
+
+    Since an fpe is unlikely, mawk 2.x.x will deal with 
+    it very simply.
+
+*/
+
+static void catch_fpe(int x)
+{
+    if (x == SIGFPE) {
+        rt_error("floating point arithmetic exception") ;
+    }
+    else bozo("catch_fpe") ;
+    mawk_exit(2) ;
+}
+
+
+/*   HELP  */
+
+/* to change this
+   edit help.txt
+   run $ mawk -f help.awk help.txt > out
+   with an editor put out into help[]
+*/
+
+static const char* const help[] = {
+"Usage:",
+"\tmawk [--help]",
+"\tmawk [--version]",
+"\tmawk [-W option] [-F value] [-v var=value] [--] 'program text' file(s)",
+"\tmawk [-W option] [-F value] [-v var=value] [-f program-file] [--] file(s)",
+"",
+"Generic options:",
+"",
+"\t--help         Display this help message and exit 0.",
+"",
+"\t--version      Display mawk version and exit 0.",
+"",
+"Normal awk-implementation options:",
+"",
+"\t-F value       Set the field separator, FS, to value.",
+"",
+"\t-f file        Program text is read from file instead of from the",
+"\t               command line.  Multiple -f options are allowed.",
+"",
+"\t-v var=value   Assign value to program variable var.",
+"",
+"\t--             Indicate the unambiguous end of options.",
+"",
+"The above options are available with any IEEE 1003 POSIX-compatible",
+"implementation of AWK.  mawk-specific options are prefaced with -W.",
+"",
+"\t-W dump        Write an assembler-like listing of the internal",
+"\t               representation of the program to stdout and exit 0 (on",
+"\t               successful compilation).",
+"",
+"\t-W exec file   Program text is read from file and this is the last",
+"\t               option.  It is useful on systems that support the",
+"\t               #! \"magic number\" convention for executable scripts.",
+"",
+"\t-W help        Display this help message and exit 0.",
+"",
+"\t-W interactive Set unbuffered writes to stdout and line buffered reads",
+"\t               from stdin.  Records from stdin are lines regardless of",
+"\t               the value of RS.",
+"",
+"\t-W posix       Force mawk not to consider '\\n' to be space and \\\\",
+"\t               is always \\ on the second scan of a replacement string.",
+"",
+"\t-W version     Display mawk version and exit 0.",
+"",
+"mawk accepts abbreviations for any of these options, e.g., \"-W v\", \"-Wv\" ",
+"and \"--v\" all tell mawk to display its version.",
+0 } ;
+
+static void
+print_help()
+{
+    int i = 0 ;
+    while(help[i]) {
+        printf("%s\n", help[i]) ;
+	i++ ;
+    }
+    mawk_exit(0) ;
 }

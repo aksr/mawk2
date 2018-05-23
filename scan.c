@@ -1,65 +1,19 @@
 
 /********************************************
 scan.c
-copyright 1991, Michael D. Brennan
+copyright 1991,2014-2016 Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
 
-/* $Log: scan.c,v $
- * Revision 1.8  1996/07/28 21:47:05  mike
- * gnuish patch
- *
- * Revision 1.7  1995/06/18  19:42:24  mike
- * Remove some redundant declarations and add some prototypes
- *
- * Revision 1.6  1995/06/10  16:57:52  mike
- * silently exit(0) if no program
- * always add a '\n' on eof in scan_fillbuff()
- *
- * Revision 1.5  1995/06/06  00:18:33  mike
- * change mawk_exit(1) to mawk_exit(2)
- *
- * Revision 1.4  1994/09/23  00:20:04  mike
- * minor bug fix: handle \ in eat_nl()
- *
- * Revision 1.3  1993/07/17  00:45:21  mike
- * indent
- *
- * Revision 1.2	 1993/07/04  12:52:09  mike
- * start on autoconfig changes
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:20  mike
- * move source to cvs
- *
- * Revision 5.6	 1993/02/13  21:57:33  mike
- * merge patch3
- *
- * Revision 5.5	 1993/01/01  21:30:48  mike
- * split new_STRING() into new_STRING and new_STRING0
- *
- * Revision 5.4.1.1  1993/01/15	 03:33:50  mike
- * patch3: safer double to int conversion
- *
- * Revision 5.4	 1992/11/29  18:57:50  mike
- * field expressions convert to long so 16 bit and 32 bit
- * systems behave the same
- *
- * Revision 5.3	 1992/07/08  15:43:41  brennan
- * patch2: length returns.  I am a wimp
- *
- * Revision 5.2	 1992/02/21  14:16:53  brennan
- * fix:	 getline <=
- *
- * Revision 5.1	 91/12/05  07:56:27  brennan
- * 1.1 pre-release
- *
-*/
 
 
 #include  "mawk.h"
@@ -67,33 +21,32 @@ the GNU General Public License, version 2, 1991.
 #include  "memory.h"
 #include  "field.h"
 #include  "init.h"
+#include  "int.h"
 #include  "fin.h"
 #include  "repl.h"
 #include  "code.h"
 
-#ifndef	  NO_FCNTL_H
 #include  <fcntl.h>
-#endif
 
 #include  "files.h"
 
 
 /* static functions */
-static void PROTO(scan_fillbuff, (void)) ;
-static void PROTO(scan_open, (void)) ;
-static int PROTO(slow_next, (void)) ;
-static void PROTO(eat_comment, (void)) ;
-static void PROTO(eat_semi_colon, (void)) ;
-static double PROTO(collect_decimal, (int, int *)) ;
-static int PROTO(collect_string, (void)) ;
-static int PROTO(collect_RE, (void)) ;
+static void  scan_fillbuff(void) ;
+static void  scan_open(void) ;
+static int  slow_next(void) ;
+static void  eat_comment(void) ;
+static void  eat_semi_colon(void) ;
+static double  collect_decimal(int, int *) ;
+static int  collect_string(void) ;
+static int  collect_RE(void) ;
 
 
 /*-----------------------------
   program file management
  *----------------------------*/
 
-char *pfile_name ;
+const char *pfile_name ;
 STRING *program_string ;
 PFILE *pfile_list ;
 static unsigned char *buffer ;
@@ -102,9 +55,26 @@ static unsigned char *buffp ;
 static int program_fd ;
 static int eof_flag ;
 
+/* tmp buffer */
+char* string_buff ;
+char* string_buff_end ;
+
+/* on entry p points into string_buff, grow string_buff and
+   return a new p */
+char* enlarge_string_buff(char* p)
+{
+    const unsigned s32 = 32 * 1024 ;
+    size_t len = string_buff_end - string_buff ;
+    size_t nlen = (len < s32) ? 2*len : len+s32 ;
+    size_t pdiff = p - string_buff ;
+    string_buff = (char *)erealloc(string_buff,nlen) ;
+    string_buff_end = string_buff + nlen ;
+    return string_buff + pdiff ;
+}
+
+
 void
-scan_init(cmdline_program)
-   char *cmdline_program ;
+scan_init(const char* cmdline_program)
 {
    if (cmdline_program)
    {
@@ -120,6 +90,7 @@ scan_init(cmdline_program)
    {
       scan_open() ;
       buffp = buffer = (unsigned char *) zmalloc(BUFFSZ + 1) ;
+      buffer[BUFFSZ] = 0 ;
       scan_fillbuff() ;
    }
 
@@ -153,7 +124,7 @@ scan_open()			/* open pfile_name */
 }
 
 void
-scan_cleanup()
+scan_cleanup(void)
 {
    if (program_fd >= 0)	 zfree(buffer, BUFFSZ + 1) ;
    else	 free_STRING(program_string) ;
@@ -194,10 +165,11 @@ static unsigned lineno = 1 ;
 
 
 static void
-scan_fillbuff()
+scan_fillbuff(void)
 {
    unsigned r ;
 
+   /* size of buffer is BUFFSZ+1 and buffer[BUFFSZ] == 0 */
    r = fillbuff(program_fd, (char *) buffer, BUFFSZ) ;
    if (r < BUFFSZ)
    {
@@ -210,7 +182,7 @@ scan_fillbuff()
 
 /* read one character -- slowly */
 static int
-slow_next()
+slow_next(void)
 {
 
    while (*buffp == 0)
@@ -240,7 +212,7 @@ slow_next()
 }
 
 static void
-eat_comment()
+eat_comment(void)
 {
    register int c ;
 
@@ -256,7 +228,7 @@ eat_comment()
 */
 
 static void
-eat_semi_colon()
+eat_semi_colon(void)
 /* eat one semi-colon on the current line */
 {
    register int c ;
@@ -292,7 +264,7 @@ eat_nl()			/* eat all space including newlines */
 	       while (scan_code[c = next()] == SC_SPACE) ;
 	       if (c == '\n')
 		  token_lineno = ++lineno ;
-	       else if (c == 0)  
+	       else if (c == 0)
 	       {
 		  un_next() ;
 		  return ;
@@ -309,7 +281,7 @@ eat_nl()			/* eat all space including newlines */
 	       }
 	    }
 	    break ;
-	     
+
 	 default:
 	    un_next() ;
 	    return ;
@@ -317,7 +289,7 @@ eat_nl()			/* eat all space including newlines */
 }
 
 int
-yylex()
+yylex(void)
 {
    register int c ;
 
@@ -420,10 +392,11 @@ reswitch:
 	    {
 	       if (*p == current_token)
 	       {
-		  if (*p != INC_or_DEC)	 test1_ret('=', DIV_ASG, DIV) ;
+		  if (*p != INC_or_DEC)	 {
+		      test1_ret('=', DIV_ASG, DIV) ;
+		  }
 
-		  if (next() == '=')
-		  {
+		  if (next() == '=') {
 		     un_next() ;
 		     ct_ret(collect_RE()) ;
 		  }
@@ -635,13 +608,16 @@ reswitch:
 	    }
 	    else
 	    {
-	       if (d > MAX_FIELD)
-	       {
+	       int ival = d_to_int(d) ;
+	       double dval = (double) ival ;
+	       if (dval != d) {
 		  compile_error(
-		     "$%g exceeds maximum field(%d)", d, MAX_FIELD) ;
-		  d = MAX_FIELD ;
-	       }
-	       yylval.cp = field_ptr((int) d) ;
+		     "$%g is an invalid field index", d) ;
+		  /* set it to something valid so error does not propagate,
+		     it will not be executed or da'ed  */
+		  ival = 0 ;
+               }
+	       yylval.cp = field_ptr(ival) ;
 	    }
 
 	    ct_ret(FIELD) ;
@@ -727,18 +703,6 @@ reswitch:
 		  current_token = BUILTIN ;
 		  break ;
 
-	       case ST_LENGTH:
-
-		  yylval.bip = stp->stval.bip ;
-
-		  /* check for length alone, this is an ugly
-			 hack */
-		  while (scan_code[c = next()] == SC_SPACE) ;
-		  un_next() ;
-
-		  current_token = c == '(' ? BUILTIN : LENGTH ;
-		  break ;
-
 	       case ST_FIELD:
 		  yylval.cp = stp->stval.cp ;
 		  current_token = FIELD ;
@@ -762,9 +726,7 @@ reswitch:
    Return the value and error conditions by reference */
 
 static double
-collect_decimal(c, flag)
-   int c ;
-   int *flag ;
+collect_decimal(int c, int* flag)
 {
    register unsigned char *p = (unsigned char *) string_buff + 1 ;
    unsigned char *endp ;
@@ -852,16 +814,13 @@ static char hex_val['f' - 'A' + 1] =
 #define	 hex_value(x)	hex_val[(x)-'A']
 
 #define ishex(x) (scan_code[x] == SC_DIGIT ||\
-		  'A' <= (x) && (x) <= 'f' && hex_value(x))
+		  ('A' <= (x) && (x) <= 'f' && hex_value(x)))
 
-static int PROTO(octal, (char **)) ;
-static int PROTO(hex, (char **)) ;
 
 /* process one , two or three octal digits
    moving a pointer forward by reference */
 static int
-octal(start_p)
-   char **start_p ;
+octal(char** start_p)
 {
    register char *p = *start_p ;
    register unsigned x ;
@@ -880,8 +839,7 @@ octal(start_p)
    moving a pointer forward by reference */
 
 static int
-hex(start_p)
-   char **start_p ;
+hex(char** start_p)
 {
    register unsigned char *p = (unsigned char *) *start_p ;
    register unsigned x ;
@@ -907,28 +865,26 @@ static struct
 {
    char in, out ;
 }
-escape_test[ET_END + 1] =
-{
-   'n', '\n',
-   't', '\t',
-   'f', '\f',
-   'b', '\b',
-   'r', '\r',
-   'a', '\07',
-   'v', '\013',
-   '\\', '\\',
-   '\"', '\"',
-   0, 0
+escape_test[ET_END + 1] = {
+   { 'n', '\n'},
+   { 't', '\t'},
+   { 'f', '\f'},
+   { 'b', '\b'},
+   { 'r', '\r'},
+   { 'a', '\07'},
+   { 'v', '\013'},
+   { '\\', '\\'},
+   { '\"', '\"'},
+   {0, 0}
 } ;
 
 
-/* process the escape characters in a string, in place . */
+/* process the escape characters in a string, in place
+   return the new length */
 
-char *
-rm_escape(s)
-   char *s ;
+size_t rm_escape(char* s)
 {
-   register char *p, *q ;
+   char *p, *q ;
    char *t ;
    int i ;
 
@@ -936,9 +892,9 @@ rm_escape(s)
 
    while (*p)
    {
-      if (*p == '\\')
-      {
-	 escape_test[ET_END].in = *++p ; /* sentinal */
+      if (*p == '\\') {
+         p++ ;
+	 escape_test[ET_END].in = *p ; /* sentinal */
 	 i = 0 ;
 	 while (escape_test[i].in != *p)  i++ ;
 
@@ -971,17 +927,17 @@ rm_escape(s)
    }
 
    *q = 0 ;
-   return s ;
+   return q-s ;
 }
 
 static int
-collect_string()
+collect_string(void)
 {
    register unsigned char *p = (unsigned char *) string_buff ;
    int c ;
    int e_flag = 0 ;		 /* on if have an escape char */
 
-   while (1)
+   while (1) {
       switch (scan_code[*p++ = next()])
       {
 	 case SC_DQUOTE:	/* done */
@@ -1016,65 +972,205 @@ collect_string()
 	 default:
 	    break ;
       }
+  }
 
 out:
-   yylval.ptr = (PTR) new_STRING(
-				   e_flag ? rm_escape(string_buff)
-				   : string_buff) ;
-   return STRING_ ;
+    {
+	size_t len = (char*) p - string_buff ;
+        if (e_flag) {
+            len = rm_escape(string_buff) ;
+	}
+        yylval.ptr = new_STRING2(string_buff, len) ;
+    }
+    return STRING_ ;
 }
 
 
-static int
-collect_RE()
+/* bad character class in an RE */
+static void box_error(unsigned char* p)
 {
-   register unsigned char *p = (unsigned char *) string_buff ;
-   int c ;
-   STRING *sval ;
-
-   while (1)
-      switch (scan_code[*p++ = next()])
-      {
-	 case SC_DIV:		/* done */
-	    *--p = 0 ;
-	    goto out ;
-
-	 case SC_NL:
-	    p[-1] = 0 ;
-	    /* fall thru */
-
-	 case 0:		/* unterminated re */
-	    compile_error(
-			    "runaway regular expression /%.10s ...",
-			    string_buff, token_lineno) ;
-	    mawk_exit(2) ;
-
-	 case SC_ESCAPE:
-	    switch (c = next())
-	    {
-	       case '/':
-		  p[-1] = '/' ;
-		  break ;
-
-	       case '\n':
-		  p-- ;
-		  break ;
-
-	       case 0:
-		  un_next() ;
-		  break ;
-
-	       default:
-		  *p++ = c ;
-		  break ;
-	    }
-	    break ;
-      }
-
-out:
-   /* now we've got the RE, so compile it */
-   sval = new_STRING(string_buff) ;
-   yylval.ptr = re_compile(sval) ;
-   free_STRING(sval) ;
-   return RE ;
+    *p = 0 ;
+    compile_error(
+	"invalid character class in regular expr /%.10s ..",
+	string_buff, token_lineno) ;
+    mawk_exit(2) ;
 }
+
+/* seen [:   collect to :] */
+static unsigned char* collect_named_box(unsigned char* p)
+{
+    unsigned c ;
+    while(1) {
+        if (p >(unsigned char*) string_buff_end - 2) {
+	    p = (unsigned char*) enlarge_string_buff((char*)p) ;
+	}
+	switch(c = next()) {
+	    case 0:
+	    case '\n':
+	        box_error(p) ;
+	    case '\\':
+	        c = next() ;
+		if (c != '\n') box_error(p) ;
+		break ;
+
+	    case ':':
+	        c = next() ;
+		if (c == ']') {
+		    p[0] = ':' ;
+		    p[1] = ']' ;
+		    return p+2 ;
+		}
+		else box_error(p) ;
+
+	    default:
+	        *p++ = c ;
+		break ;
+	}
+    }
+}
+
+/* seen [ collect to ] */
+unsigned char* collect_RE_box(unsigned char* p)
+{
+    unsigned c ;
+    unsigned char* end = (unsigned char*) string_buff_end ;
+
+    /* [].. and [^].. is ok */
+    if (p+2 >= end) {
+        p = (unsigned char*) enlarge_string_buff((char*) p) ;
+	end = (unsigned char*) string_buff_end ;
+    }
+    c = next() ;
+    if (c == ']') {
+        *p++ = ']' ;
+	c = next() ;
+    }
+    else if (c == '^') {
+        *p++ = '^' ;
+	c = next() ;
+	if (c == ']') {
+	    *p++ = ']' ;
+	    c = next() ;
+	}
+    }
+
+    /* c is ready to be tested */
+    while(1) {
+        if (p+2 >= end) {
+            p = (unsigned char*) enlarge_string_buff((char*) p) ;
+	    end = (unsigned char*) string_buff_end ;
+        }
+        switch(c) {
+	    case 0:
+	    case '\n':
+	        box_error(p) ;
+	    case ']':
+	        /* done */
+		*p++ = ']' ;
+		return p ;
+
+	    case '\\':
+	        c = next() ;
+		if (c == 0) {
+		    box_error(p) ;
+		}
+		if (c == '\n') {
+		    /* "\\\n" is removed */
+		}
+		else {
+		    p[0] = '\\' ;
+		    p[1] = c ;
+		    p += 2 ;
+		}
+		break ;
+
+	    case '[':
+	        c = next() ;
+		if (c == ':') {
+		    p[0] = '[' ;
+		    p[1] = ':' ;
+		    p = collect_named_box(p+2) ;
+		}
+		else {
+		    un_next() ;
+		    *p++ = '[' ;
+		}
+		break ;
+
+	    default:
+	        *p++ = c ;
+		break ;
+	}
+	c = next() ;
+    }
+}
+
+static void runaway_RE(unsigned char* p)
+{
+    *p = 0 ;
+    compile_error("runaway regular expression /%.10s ...",
+			    string_buff, token_lineno) ;
+     mawk_exit(2) ;
+}
+
+/* seen /  collect to terminating /
+
+    no attempt to interpret as it will be passed to REcompile()
+
+    however this needs to understand [..] as / is ok inside
+    a character class.  This was a bug in mawk 1.3.3
+
+    also removes  "\\\n" (escaped nl) so it doesn't go to REcompile()
+*/
+static int
+collect_RE(void)
+{
+    unsigned char *p = (unsigned char *) string_buff ;
+    unsigned  c ;
+    STRING *sval ;
+
+    while (1) {
+        if (p >= (unsigned char*) string_buff_end - 2) {
+	    p = (unsigned char*) enlarge_string_buff((char*)p) ;
+	}
+	c = next() ;
+	switch(c) {
+	    case '/':  /* done */
+	        *p = 0 ;
+                sval = new_STRING(string_buff) ;
+                yylval.ptr = re_compile(sval) ;
+                free_STRING(sval) ;
+                return RE ;
+
+	    case 0:
+	    case '\n':
+	        runaway_RE(p) ;
+
+	    case '\\':
+	        c = next() ;
+		if (c == 0) {
+		    runaway_RE(p) ;
+		}
+		if (c == '\n') {
+		     /* "\\\n" is removed */
+		}
+		else {
+		    p[0] = '\\' ;
+		    p[1] = c ;
+		    p += 2 ;
+		}
+		break ;
+
+	    case '[':
+		*p++ = c ;
+	        p = collect_RE_box(p) ;
+		break ;
+
+	    default:
+	        *p++ = c ;
+		break ;
+	}
+    }
+}
+
+

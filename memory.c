@@ -1,30 +1,18 @@
 
 /********************************************
 memory.c
-copyright 1991, 1992  Michael D. Brennan
+copyright 1991,1992,2014-2016  Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
 
 Mawk is distributed without warranty under the terms of
-the GNU General Public License, version 2, 1991.
+the GNU General Public License, version 3, 2007.
+
+If you import elements of this code into another product,
+you agree to not name that product mawk.
 ********************************************/
 
-
-/* $Log: memory.c,v $
- * Revision 1.2  1993/07/17  13:23:08  mike
- * indent and general code cleanup
- *
- * Revision 1.1.1.1  1993/07/03	 18:58:17  mike
- * move source to cvs
- *
- * Revision 5.2	 1993/01/01  21:30:48  mike
- * split new_STRING() into new_STRING and new_STRING0
- *
- * Revision 5.1	 1991/12/05  07:56:21  brennan
- * 1.1 pre-release
- *
-*/
 
 
 /* memory.c */
@@ -32,70 +20,88 @@ the GNU General Public License, version 2, 1991.
 #include "mawk.h"
 #include "memory.h"
 
-static STRING *PROTO(xnew_STRING, (unsigned)) ;
-
-
 STRING null_str =
 {0, 1, ""} ;
+STRING* const the_empty_str = &null_str ;
 
 static STRING *
-xnew_STRING(len)
-   unsigned len ;
+xnew_STRING(size_t len)
 {
-   STRING *sval = (STRING *) zmalloc(len + STRING_OH) ;
+   STRING *sval = (STRING *) zmalloc(STRING_SIZE(len)) ;
 
    sval->len = len ;
    sval->ref_cnt = 1 ;
+   sval->str[len] = 0 ;
    return sval ;
 }
 
 /* allocate space for a STRING */
 
 STRING *
-new_STRING0(len)
-   unsigned len ;
+new_STRING0(size_t len)
 {
-   if (len == 0)
-   {
-      null_str.ref_cnt++ ;
-      return &null_str ;
+   if (len == 0) {
+       return STRING_dup(the_empty_str) ;
    }
    else
    {
-      STRING *sval = xnew_STRING(len) ;
-      sval->str[len] = 0 ;
-      return sval ;
+      return xnew_STRING(len) ;
    }
+}
+
+/* memcpy into a STRING */
+
+STRING*
+new_STRING2(const char* s, size_t len)
+{
+    if (len == 0) {
+        return STRING_dup(the_empty_str) ;
+    }
+    else {
+        STRING* ret = xnew_STRING(len) ;
+	memcpy(ret->str, s, len) ;
+	return ret ;
+    }
 }
 
 /* convert char* to STRING* */
 
 STRING *
-new_STRING(s)
-   char *s ;
+new_STRING(const char* s)
 {
-
-   if (s[0] == 0)
-   {
-      null_str.ref_cnt++ ;
-      return &null_str ;
-   }
-   else
-   {
-      STRING *sval = xnew_STRING(strlen(s)) ;
-      strcpy(sval->str, s) ;
-      return sval ;
-   }
+    size_t len = strlen(s) ;
+    return new_STRING2(s,len) ;
 }
 
+/* compare two strings in manner of strcmp  */
+int STRING_cmp(STRING* s1, STRING* s2) 
+{
+    int ret ;
+    size_t len1 = s1->len ;
+    size_t len2 = s2->len ;
+    size_t len = len1 <= len2 ? len1 : len2 ;
+
+    ret = memcmp(s1->str, s2->str, len) ;
+    if (ret == 0) {
+        if (len1 > len) {
+	    ret = 1 ;
+	}
+	else if (len2 > len) {
+	    ret = -1 ;
+	}
+    }
+    return ret ;
+}
+        
 
 #ifdef	 DEBUG
 
 void
-DB_free_STRING(sval)
-   register STRING *sval ;
+DB_free_STRING(STRING* sval)
 {
-   if (--sval->ref_cnt == 0)  zfree(sval, sval->len + STRING_OH) ;
+    if (--sval->ref_cnt == 0)  {
+        zfree(sval, STRING_SIZE(sval->len)) ;
+    }
 }
 
 #endif
