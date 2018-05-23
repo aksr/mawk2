@@ -1,5 +1,5 @@
 
-#$Id: packing.list,v 1.7 2016/07/28 21:28:40 mike Exp $
+#$Id: packing.list,v 1.8 2016/08/02 11:08:14 mike Exp $
 
 ################################################
 # These files form the beta mawk distribution 1.9.9.x
@@ -79,7 +79,7 @@ parse.y
 ########################
 # directory:  man
 man/mawk.1		troff source for unix style man pages
-man/mawk.doc		ascii man pages
+man/mawk.txt		ascii man pages
 ########################
 # directory:  rexp
 rexp/Makefile		make rexp*.o files
