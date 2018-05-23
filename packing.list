@@ -1,8 +1,8 @@
 
-#$Id: packing.list,v 1.13 1996/01/18 11:51:37 mike Exp $
+#$Id: packing.list,v 1.17 1996/09/18 00:40:21 mike Exp $
 
 ################################################
-# These files form the mawk distribution 1.2
+# These files form the mawk distribution 1.3
 #
 # Mawk is an implementation of the AWK Programming Language as
 # defined and described in Aho, Kernighan and Weinberger, The
@@ -11,7 +11,7 @@
 #
 ################################################
 packing.list		this file
-README			description of mawk 1.2beta
+README			description of mawk 1.3
 INSTALL			installation instructions
 COPYING			GNU General Public License, version 2	
 ACKNOWLEDGMENT
@@ -29,9 +29,9 @@ config-user/convex
 config-user/mips
 config-user/sgi
 config-user/ultrix-mips
+config-user/cray
 ######################
-array.c			source files
-bi_funct.c
+bi_funct.c		source files
 bi_vars.c
 cast.c
 code.c
@@ -81,6 +81,9 @@ zmalloc.h
 parse.y
 parse.c
 parse.h
+array.w
+array.c
+array.h
 fpe_check.c
 ########################
 # directory:  man
@@ -122,6 +125,7 @@ test/wfrq-awk.out
 ######################
 # directory:  examples       useful awk programs
 examples/hical			calendar program by Bob Stockler
+examples/hcal			Bob's latest
 examples/decl.awk
 examples/deps.awk
 examples/gdecl.awk
@@ -140,7 +144,7 @@ msdos/argvmks.c			for MKS Korn Shell
 msdos/makefile.tcc		for [TB]CC and Borland make
 msdos/makefile.msc		nmake and MSC 6.0A
 msdos/makefile.ztc	        
-msdos/mawkmsc.lnk
+msdos/mawk.def
 msdos/tcc.h
 msdos/msc.h
 msdos/ztc.h

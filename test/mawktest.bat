@@ -10,41 +10,42 @@ rem  it's too bad that years after MSDOS was introduced that basic
 rem  system utilities like fc still don't return valid exit codes!!!
 
 set dat=mawktest.dat
+if %CMP%.==. set CMP=cmp
 
 rem  find out which mawk we're testing
-mawk -Wv
+..\mawk -Wv
 
 rem ################################
 
 echo testing input and field splitting
-mawk -f wc.awk %dat% > temp$$
-fc temp$$ wc-awk.out
+..\mawk -f wc.awk %dat% > temp$$
+%CMP% temp$$ wc-awk.out
 if errorlevel 1 goto :done
 
 rem ####################################
 
 echo testing regular expression matching
-mawk -f reg0.awk %dat% > temp$$
-mawk -f reg1.awk %dat% >> temp$$
-mawk -f reg2.awk %dat% >> temp$$
-fc temp$$ reg-awk.out
+..\mawk -f reg0.awk %dat% > temp$$
+..\mawk -f reg1.awk %dat% >> temp$$
+..\mawk -f reg2.awk %dat% >> temp$$
+%CMP% temp$$ reg-awk.out
 if errorlevel 1 goto :done
 
 rem ######################################
 
 echo testing arrays and flow of control
-mawk -f wfrq0.awk %dat% > temp$$
-fc temp$$ wfrq-awk.out
+..\mawk -f wfrq0.awk %dat% > temp$$
+%CMP% temp$$ wfrq-awk.out
 if errorlevel 1 goto :done
 
 rem ################################
 
 echo testing function calls and general stress test
-mawk -f ../examples/decl.awk %dat% > temp$$
-fc temp$$ decl-awk.out
+..\mawk -f ../examples/decl.awk %dat% > temp$$
+%CMP% temp$$ decl-awk.out
 if errorlevel 1 goto :done
 
-echo if fc always encountered "no differences", then the tested mawk seems OK
+echo if %CMP% always encountered "no differences", then the tested mawk seems OK
 :done
 del temp$$
 set dat=

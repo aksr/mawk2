@@ -12,6 +12,9 @@ the GNU General Public License, version 2, 1991.
 
 
 /* $Log: scan.c,v $
+ * Revision 1.8  1996/07/28 21:47:05  mike
+ * gnuish patch
+ *
  * Revision 1.7  1995/06/18  19:42:24  mike
  * Remove some redundant declarations and add some prototypes
  *
@@ -120,6 +123,10 @@ scan_init(cmdline_program)
       scan_fillbuff() ;
    }
 
+#ifdef OS2  /* OS/2 "extproc" is similar to #! */
+   if (strnicmp(buffp, "extproc ", 8) == 0)
+     eat_comment();
+#endif
    eat_nl() ;			 /* scan to first token */
    if (next() == 0)
    {

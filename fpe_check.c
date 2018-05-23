@@ -4,6 +4,16 @@
 */
 
 /* $Log: fpe_check.c,v $
+ * Revision 1.7  1996/08/30 00:07:14  mike
+ * Modifications to the test and implementation of the bug fix for
+ * solaris overflow in strtod.
+ *
+ * Revision 1.6  1996/08/25 19:25:46  mike
+ * Added test for solaris strtod overflow bug.
+ *
+ * Revision 1.5  1996/08/11 22:10:39  mike
+ * Some systems blow the !(d==d) test for a NAN.  Added a work around.
+ *
  * Revision 1.4  1995/01/09  01:22:28  mike
  * check sig handler ret type to make fpe_check.c more robust
  *
@@ -12,9 +22,6 @@
  *
  * Revision 1.2  1994/12/14  14:37:26  mike
  * add messages to user
- *
- * Revision 1.1  1994/10/10  00:14:50  mike
- * initial ci
  *
 */
 
@@ -36,8 +43,12 @@ void message(s)
 jmp_buf jbuff ;
 int may_be_safe_to_look_at_why = 0 ;
 int why_v ;
+int checking_for_strtod_ovf_bug = 0 ;
 
 RETSIGTYPE fpe_catch() ;
+int is_nan() ;
+void check_strtod_ovf() ;
+double strtod() ;
 
 double
 div_by(x,y)
@@ -93,21 +104,32 @@ void check_fpe_traps()
    {
       double maybe_nan = log(-8.0) ;
 
-      if ( maybe_nan == maybe_nan )
+      if (is_nan(maybe_nan))
       {
-	 /* evidently not a nan */
-	 traps |= 4 ;
-	 message("math library does not support ieee754") ;
+	 message("math library supports ieee754") ;
       }
       else
       {
-	 message("math library supports ieee754") ;
+	 traps |= 4 ;
+	 message("math library does not support ieee754") ;
       }
    }
 
    exit(traps) ;
 }
 
+int is_nan(d)
+   double d ;
+{
+   char command[128] ;
+
+   if (!(d==d))  return 1 ;
+
+   /* on some systems with an ieee754 bug, we need to make another check */
+   sprintf(command, 
+	   "echo '%f' | egrep '[nN][aA][nN]|\\?' >/dev/null", d) ; 
+   return system(command)==0 ;
+}
 
 /*
 Only get here if we think we have Berkeley type signals so we can
@@ -153,9 +175,17 @@ main(argc)
 {
 
    signal(SIGFPE, fpe_catch) ;
-   if (argc > 1)  get_fpe_codes() ;
-   else  check_fpe_traps() ;
-
+   switch(argc) {
+      case 1 : 
+	 check_fpe_traps() ;
+	 break ;
+      case 2 : 
+	 get_fpe_codes() ;
+	 break ;
+      default: 
+	 check_strtod_ovf() ;
+	 break ;
+   }
    /* not reached */
    return 0 ;
 } 
@@ -167,6 +197,67 @@ RETSIGTYPE fpe_catch(signal, why)
    int signal ;
    int why ;
 {
+   if (checking_for_strtod_ovf_bug) exit(1) ;
    if ( may_be_safe_to_look_at_why ) why_v = why ;
    longjmp(jbuff,1) ;
+}
+
+char longstr[] =
+"1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890\
+1234567890" ;
+
+#ifdef  USE_IEEEFP_H
+#include <ieeefp.h>
+#endif
+
+void
+check_strtod_ovf()
+{
+    double x ; 
+
+#ifdef USE_IEEEFP_H
+    fpsetmask(fpgetmask()|FP_X_OFL|FP_X_DZ) ;
+#endif
+
+    checking_for_strtod_ovf_bug = 1 ;
+    strtod(longstr,(char**)0) ;
+    exit(0) ;
 }

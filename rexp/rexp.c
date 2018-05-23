@@ -11,8 +11,11 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /*$Log: rexp.c,v $
- * Revision 1.2  1993/07/23  13:21:32  mike
- * cleanup rexp code
+ *Revision 1.3  1996/09/02 18:47:36  mike
+ *Make ^* and ^+ syntax errors.
+ *
+ *Revision 1.2  1993/07/23 13:21:32  mike
+ *cleanup rexp code
  *
  * Revision 1.1.1.1  1993/07/03	 18:58:26  mike
  * move source to cvs
@@ -52,7 +55,8 @@ char *REerrlist[] =
  /* 2  */ "missing ')'",
  /* 3  */ "bad class -- [], [^] or [",
  /* 4  */ "missing operand",
- /* 5  */ "resource exhaustion -- regular expression too large"
+ /* 5  */ "resource exhaustion -- regular expression too large" ,
+ /* 6  */ "syntax error ^* or ^+"
 } ;
 /* E5 is very unlikely to occur */
 

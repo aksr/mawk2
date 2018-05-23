@@ -11,6 +11,9 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /*$Log: matherr.c,v $
+ *Revision 1.9  1996/09/01 16:54:35  mike
+ *Third try at bug fix for solaris strtod.
+ *
  * Revision 1.6  1994/12/18  20:53:43  mike
  * check NetBSD mathlib defines
  *
@@ -47,6 +50,10 @@ _LIB_VERSION_TYPE _LIB_VERSION = _IEEE_;
 
 #ifdef	USE_IEEEFP_H
 #include <ieeefp.h>
+#ifdef   HAVE_STRTOD_OVF_BUG
+static fp_except entry_mask ;
+static fp_except working_mask ;
+#endif
 #endif
 
 #ifndef	 TURN_OFF_FPE_TRAPS
@@ -120,6 +127,12 @@ fpe_init()
 
      sigaction(SIGFPE, &x, (struct sigaction*)0) ;
    }
+#endif
+
+#ifdef  HAVE_STRTOD_OVF_BUG
+   /* we've already turned the traps on */
+   working_mask = fpgetmask() ;
+   entry_mask = working_mask & ~FP_X_DZ & ~FP_X_OFL ;
 #endif
 }
 
@@ -242,4 +255,23 @@ fpcheck()
    if (errdesc)	 rt_error("%s", errdesc) ;
 }
 
+#endif
+
+#ifdef HAVE_STRTOD_OVF_BUG
+/* buggy strtod in solaris, probably any sysv with ieee754
+   strtod can generate an fpe  */
+
+double
+strtod_with_ovf_bug(s, ep)
+   const char *s ;
+   char **ep ;
+{
+   double ret ;
+
+   fpsetmask(entry_mask) ;  /* traps off */
+#undef strtod               /* make real strtod visible */
+   ret = strtod(s, ep) ;
+   fpsetmask(working_mask) ; /* traps on */
+   return ret ;
+}
 #endif

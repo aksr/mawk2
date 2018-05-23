@@ -974,6 +974,7 @@ Fflush returns 0 if
 .I expr
 is an open output stream else \-1.
 Fflush without an argument flushes stdout.
+Fflush with an empty argument ("") flushes all open output.
 .PP
 The function 
 \fBsystem\fR(\fIexpr\fR)
@@ -1612,4 +1613,4 @@ inherits any bugs or limitations of the library functions.
 Implementors of the AWK language have shown a consistent lack
 of imagination when naming their programs.
 .SH AUTHOR
-Mike Brennan (brennan@boeing.com).
+Mike Brennan (brennan@whidbey.com).

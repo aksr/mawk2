@@ -1,3 +1,28 @@
+1.3.1 -> 1.3.2 Sep 1996
+
+1) Numeric but not integer indices caused core dump in new array scheme.
+   Fixed bug and fired test division.
+
+2) Added ferror() checks on writes.
+
+3) Added some static storage specs to array.c to keep non-ansi 
+   compilers happy.
+
+1.3 -> 1.3.1 Sep 1996
+Release to new ftp site ftp://ftp.whidbey.net.
+
+1) Workaround for overflow exception in strtod, sunos5.5 solaris.
+
+2) []...] and [^]...] put ] in a class (or not in a class) without
+   having to use back-slash escape.
+
+1.2.2 -> 1.3 Jul 1996
+Extensive redesign of array data structures to support large arrays and
+fast access to arrays created with split.  Many of the ideas in the
+new design were inspired by reading "The Design and Implementation of
+Dynamic Hashing Sets and Tables in Icon" by William Griswold and
+Gregg Townsend, SPE 23,351-367.
+ 
 1.2.1 -> 1.2.2  Jan 1996
 
 1) Improved autoconfig, in particular, fpe tests.  This is far from

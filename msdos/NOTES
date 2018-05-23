@@ -1,4 +1,18 @@
 
+Version 1.3:
+   The new array design will fail under msdos if you put more than
+   16K items into an array and then walk it with for(i in A).
+   Unfortunately things will probably fail ungracefully.  The new 
+   array design runs into 64K limits at 16K elements in an array and
+   there are no checks in the code.  This is fixable, but tedious and
+   1.2.2 works well on DOS.
+
+   If this is a problem use version 1.2.2. 
+
+   You can get updated source and executables (1.2.2) for DOS from
+       ftp.wustl.edu ~/systems/msdos/gnuish/mawk122[sx].zip
+
+
 Version 1.2:
 
    I no longer have a dos machine so must count on others to verify that

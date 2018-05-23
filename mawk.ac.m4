@@ -2,6 +2,16 @@ dnl
 dnl custom mawk macros for autoconf
 dnl 
 dnl $Log: mawk.ac.m4,v $
+dnl Revision 1.15  1996/09/04 23:40:34  mike
+dnl Small tweak to strtod bug check
+dnl
+dnl Revision 1.14  1996/08/30 00:07:18  mike
+dnl Modifications to the test and implementation of the bug fix for
+dnl solaris overflow in strtod.
+dnl
+dnl Revision 1.13  1996/08/25 19:31:03  mike
+dnl Added work-around for solaris strtod overflow bug.
+dnl
 dnl Revision 1.12  1996/01/18  11:51:36  mike
 dnl 1.2.2 release
 dnl
@@ -29,16 +39,10 @@ dnl
 dnl Revision 1.4  1994/10/11  00:39:27  mike
 dnl fpe check stuff
 dnl
-dnl Revision 1.3  1994/10/08  18:34:53  mike
-dnl none
-dnl
-dnl Revision 1.2  1994/09/25  20:16:46  mike
-dnl init checkin
-dnl
 dnl
 dnl **********  look for math library *****************
 dnl
-define(MIKE, brennan@boeing.com)
+define(MIKE, brennan@whidbey.com)
 dnl
 define(LOOK_FOR_MATH_LIBRARY,[
 if test "${MATHLIB+set}" != set  ; then
@@ -238,7 +242,7 @@ if test "$sigaction" = 1 && test "$siginfo_h" = 1 ; then
    XDEFINE(SV_SIGINFO)
 else
    AC_CHECK_FUNC(sigvec,sigvec=1)
-   if test "$sigvec" = 1 && ./fpe_check x >> defines.out ; then :
+   if test "$sigvec" = 1 && ./fpe_check phoney_arg >> defines.out ; then :
    else XDEFINE(NOINFO_SIGFPE)
    fi
 fi])
@@ -302,6 +306,18 @@ XDEFINE(USE_IEEEFP_H)
 XXDEFINE([TURN_ON_FPE_TRAPS()],
 [fpsetmask(fpgetmask()|FP_X_DZ|FP_X_OFL)])
 LOOK_FOR_FPE_SIGINFO 
+# look for strtod overflow bug
+AC_MSG_CHECKING([strtod bug on overflow])
+rm -f fpe_check
+$CC $CFLAGS -DRETSIGTYPE=$ac_cv_type_signal -DUSE_IEEEFP_H \
+	    -o fpe_check fpe_check.c $MATHLIB
+if ./fpe_check phoney_arg phoney_arg 2>/dev/null
+then 
+   AC_MSG_RESULT([no bug])
+else
+   AC_MSG_RESULT([buggy -- will use work around])
+   XXDEFINE([HAVE_STRTOD_OVF_BUG],1)
+fi
 
 else
    [if test $status != 4 ; then]
@@ -331,17 +347,20 @@ cat 1>&2 <<'EOF'
 Warning: Your system defaults do not generate floating point
 exceptions, but your math library does not support this behavior.
 You need to
-#define TURN_ON_FPE_TRAPS() 
+#define TURN_ON_FPE_TRAPS() to use fp exceptions for consistency.
 Please report this so I can fix this script to do it automatically.
 EOF
 ;;
-    esac
+    esac]
+echo MIKE
+[echo You can continue with the build and the resulting mawk will be
+echo useable, but getting FPE_TRAPS_ON correct eventually is best.
 fi  ;;
 
   *)  # some sort of disaster
 cat 1>&2 <<'EOF'
 The program `fpe_check' compiled from fpe_check.c seems to have
-unexpectly blown up.  Please report this.
+unexpectly blown up.  Please report this to ]MIKE.[
 EOF
 # quit or not ???
 ;;

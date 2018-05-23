@@ -11,6 +11,9 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /* $Log: print.c,v $
+ * Revision 1.7  1996/09/18 01:04:36  mike
+ * Check ferror() after print and printf.
+ *
  * Revision 1.6  1995/10/13  16:56:45  mike
  * Some assumptions that int==long were still in do_printf -- now removed.
  *
@@ -70,6 +73,7 @@ the GNU General Public License, version 2, 1991.
 static void PROTO(print_cell, (CELL *, FILE *)) ;
 static STRING *PROTO(do_printf, (FILE *, char *, unsigned, CELL *)) ;
 static void PROTO(bad_conversion, (int, char *, char *)) ;
+static void PROTO(write_error,(void)) ;
 
 /* prototyping fprintf() or sprintf() is a loser as ellipses will
    always cause problems with ansi compilers depending on what
@@ -185,6 +189,7 @@ bi_print(sp)
    }
 
    print_cell(ORS, fp) ;
+   if (ferror(fp)) write_error() ;
    return sp ;
 }
 
@@ -262,9 +267,14 @@ do_printf(fp, format, argcnt, cp)
    {
       if (fp)			/* printf */
       {
-	 while (*q != '%')
-	    if (*q == 0)  return (STRING *) 0 ;
-	 else  { putc(*q,fp) ; q++ ; }
+	 while (*q != '%') {
+	    if (*q == 0)  {
+	       if (ferror(fp)) write_error() ;
+	       /* return is ignored */
+	       return (STRING *) 0 ;
+	    }
+	    else  { putc(*q,fp) ; q++ ; }
+	 }
       }
       else  /* sprintf */
       {
@@ -559,4 +569,12 @@ bi_sprintf(sp)
    for (p = sp + 1; argcnt; argcnt--, p++)  cell_destroy(p) ;
 
    return sp ;
+}
+
+
+static void 
+write_error()
+{
+   errmsg(errno, "write failure") ;
+   mawk_exit(2) ;
 }

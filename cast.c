@@ -12,6 +12,9 @@ the GNU General Public License, version 2, 1991.
 
 
 /*   $Log: cast.c,v $
+ *   Revision 1.6  1996/08/11 22:07:50  mike
+ *   Fix small bozo in rt_error("overflow converting ...")
+ *
  * Revision 1.5  1995/06/18  19:17:45  mike
  * Create a type Int which on most machines is an int, but on machines
  * with 16bit ints, i.e., the PC is a long.  This fixes implicit assumption
@@ -91,7 +94,7 @@ cast1_to_d(cp)
 	    errno = 0 ;
 	    cp->dval = strtod(s->str, (char **) 0) ;
 	    if (errno && cp->dval != 0.0)	/* ignore underflow */
-	       rt_error("overflow converting %s to double", s) ;
+	       rt_error("overflow converting %s to double", s->str) ;
 #else
 	    cp->dval = strtod(s->str, (char **) 0) ;
 #endif
@@ -137,7 +140,7 @@ cast2_to_d(cp)
 	 errno = 0 ;
 	 cp->dval = strtod(s->str, (char **) 0) ;
 	 if (errno && cp->dval != 0.0)	/* ignore underflow */
-	    rt_error("overflow converting %s to double", s) ;
+	    rt_error("overflow converting %s to double", s->str) ;
 #else
 	 cp->dval = strtod(s->str, (char **) 0) ;
 #endif
@@ -171,7 +174,7 @@ cast2_to_d(cp)
 	 errno = 0 ;
 	 cp->dval = strtod(s->str, (char **) 0) ;
 	 if (errno && cp->dval != 0.0)	/* ignore underflow */
-	    rt_error("overflow converting %s to double", s) ;
+	    rt_error("overflow converting %s to double", s->str) ;
 #else
 	 cp->dval = strtod(s->str, (char **) 0) ;
 #endif

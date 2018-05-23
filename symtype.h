@@ -11,6 +11,9 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /*$Log: symtype.h,v $
+ * Revision 1.6  1996/02/01  04:39:43  mike
+ * dynamic array scheme
+ *
  * Revision 1.5  1995/04/21  14:20:23  mike
  * move_level variable to fix bug in arglist patching of moved code.
  *
@@ -61,40 +64,11 @@ unsigned char min_args, max_args ;
    structures and types for arrays
  *--------------------------*/
 
-/* array hash nodes */
-
-/* string node */
-typedef  struct anode {
-struct anode *link , *ilink ;
-STRING *sval ;
-long     ival ;
-CELL   *cp ;
-}  ANODE ;
-
-
-typedef struct array {
-ANODE *link , *ilink ;
-} *ARRAY ;
-
-#define  CREATE         1
-#define  NO_CREATE      0
-#define  LOCAL_DEL      1
-
-/* note ARRAY is a ptr to a hash table */
-
-CELL *PROTO(array_find, (ARRAY,CELL *, int) ) ;
-INST *PROTO(array_loop, (INST *, CELL *, CELL *) ) ;
-void PROTO(array_delete, (ARRAY, CELL *) ) ;
-CELL *PROTO(array_cat, (CELL *, int) ) ;
-void PROTO(array_free, (ARRAY,int) ) ;
-void PROTO(load_array, (ARRAY,int)) ;
-
-#define new_ARRAY() (ARRAY)memset(zmalloc(A_HASH_PRIME *\
-                        sizeof(struct array)),\
-                        0 , A_HASH_PRIME*sizeof(struct array))
+#include "array.h"
 
 extern  ARRAY  Argv ;
 
+#if 0
 /* struct to hold the state of an array loop */
 typedef struct al_state {
 struct al_state *link ;
@@ -105,6 +79,7 @@ ANODE *ptr ;
 } ALOOP_STATE ;
 
 int  PROTO( inc_aloop_state, (ALOOP_STATE*)) ;
+#endif
 
 /* for parsing  (i,j) in A  */
 typedef  struct {

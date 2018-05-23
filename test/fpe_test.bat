@@ -4,7 +4,7 @@ rem  floating point exceptions
 
 echo testing division by zero
 type fpetest1.awk
-mawk -f fpetest1.awk
+..\mawk -f fpetest1.awk
 if errorlevel 128 goto :test1_128
 if errorlevel 3 goto :test1_3
 if errorlevel 2 goto :test1_2
@@ -26,7 +26,7 @@ set ret1=1
 :test2
 echo testing overflow
 type fpetest2.awk
-mawk -f fpetest2.awk
+..\mawk -f fpetest2.awk
 if errorlevel 128 goto :test2_128
 if errorlevel 3 goto :test2_3
 if errorlevel 2 goto :test2_2
@@ -48,7 +48,7 @@ set ret2=1
 :test3
 echo testing domain error
 type fpetest3.awk
-mawk -f fpetest3.awk > temp$$
+..\mawk -f fpetest3.awk > temp$$
 if errorlevel 128 goto :test3_128
 if errorlevel 3 goto :test3_3
 if errorlevel 2 goto :test3_2

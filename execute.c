@@ -1,7 +1,7 @@
 
 /********************************************
 execute.c
-copyright 1991, Michael D. Brennan
+copyright 1991-1996, Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
@@ -11,6 +11,9 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /* $Log: execute.c,v $
+ * Revision 1.13  1996/02/01  04:39:40  mike
+ * dynamic array scheme
+ *
  * Revision 1.12  1995/06/06  00:18:24  mike
  * change mawk_exit(1) to mawk_exit(2)
  *
@@ -136,6 +139,38 @@ eval_overflow()
    overflow("eval stack", EVAL_STACK_SIZE) ;
 }
 #endif
+
+/* holds info for array loops (on a stack) */
+typedef struct aloop_state {
+   struct aloop_state *link ;
+   CELL *var ;  /* for(var in A) */
+   STRING **base ;
+   STRING **ptr ;
+   STRING **limit ;
+} ALOOP_STATE ;
+
+/* clean up aloop stack on next, return, exit */
+#define CLEAR_ALOOP_STACK() if(aloop_state){\
+	    clear_aloop_stack(aloop_state);\
+	    aloop_state=(ALOOP_STATE*)0;}else
+
+static void clear_aloop_stack(top)
+   ALOOP_STATE *top ;
+{
+   ALOOP_STATE *q ;
+
+   do {
+      while(top->ptr<top->limit) {
+	 free_STRING(*top->ptr) ;
+	 top->ptr++ ;
+      }
+      if (top->base < top->limit)
+	 zfree(top->base, (top->limit-top->base)*sizeof(STRING*)) ;
+      q = top ; top = q->link ;
+      ZFREE(q) ;
+   } while (top) ;
+}
+   
 
 static INST *restart_label ;	 /* control flow labels */
 INST *next_label ;
@@ -386,13 +421,15 @@ execute(cdp, sp, fp)
 	 case SET_ALOOP:
 	    {
 	       ALOOP_STATE *ap = ZMALLOC(ALOOP_STATE) ;
+	       unsigned vector_size ;
 
 	       ap->var = (CELL *) sp[-1].ptr ;
-	       ap->A = (ARRAY) sp->ptr ;
+	       ap->base = ap->ptr = array_loop_vector(
+			    (ARRAY)sp->ptr, &vector_size) ;
+	       ap->limit = ap->base + vector_size ;
 	       sp -= 2 ;
 
-	       ap->index = -1 ;
-	       /* push */
+	       /* push onto aloop stack */
 	       ap->link = aloop_state ;
 	       aloop_state = ap ;
 	       cdp += cdp->op ;
@@ -400,22 +437,30 @@ execute(cdp, sp, fp)
 	    break ;
 
 	 case  ALOOP :
-
-	    if ( inc_aloop_state( aloop_state ) )
-	       cdp += cdp->op ;
-	    else
 	    {
 	       ALOOP_STATE *ap = aloop_state ;
-	       aloop_state = ap->link ;
-	       ZFREE(ap) ;
-	       cdp += 2 ;
+	       if (ap->ptr < ap->limit) 
+	       {
+		  cell_destroy(ap->var) ;
+		  ap->var->type = C_STRING ;
+		  ap->var->ptr = (PTR) *ap->ptr++ ;
+		  cdp += cdp->op ;
+	       }
+	       else cdp++ ;
 	    }
 	    break ;
-
+		  
 	 case  POP_AL :
 	    { 
+	       /* finish up an array loop */
 	       ALOOP_STATE *ap = aloop_state ;
                aloop_state = ap->link ;
+	       while(ap->ptr < ap->limit) {
+		  free_STRING(*ap->ptr) ;
+		  ap->ptr++ ;
+	       }
+	       if (ap->base < ap->limit)
+		  zfree(ap->base,(ap->limit-ap->base)*sizeof(STRING*)) ;
                ZFREE(ap) ;
             }
 	    break ;
@@ -1017,7 +1062,7 @@ execute(cdp, sp, fp)
 
 	 case DEL_A:
 	    /* free all the array at once */
-	    array_free(sp->ptr, 0) ;
+	    array_clear(sp->ptr) ;
 	    sp-- ;
 	    break ;
 
@@ -1042,7 +1087,7 @@ execute(cdp, sp, fp)
 	    if (begin_start)  zfree(begin_start, begin_size) ;
 	    if (main_start)  zfree(main_start, main_size) ;
 	    sp = eval_stack - 1 ;/* might be in user function */
-	    aloop_state = (ALOOP_STATE*)0 ; /* ditto */
+	    CLEAR_ALOOP_STACK() ; /* ditto */
 	    break ;
 
 	 case _JMAIN:		/* go from BEGIN code to MAIN code */
@@ -1059,12 +1104,7 @@ execute(cdp, sp, fp)
 
 	 case _NEXT:
 	    /* next might be inside an aloop -- clear stack */
-	    while ( aloop_state )
-	    {
-	       ALOOP_STATE *ap = aloop_state ;
-	       aloop_state = ap->link ;
-	       ZFREE(ap) ;
-	    }
+	    CLEAR_ALOOP_STACK() ;
 	    cdp = next_label ;
 	    break ;
 
@@ -1178,12 +1218,7 @@ execute(cdp, sp, fp)
 	    }
 
 	    /* return might be inside an aloop -- clear stack */
-	    while ( aloop_state )
-	    {
-	       ALOOP_STATE *ap = aloop_state ;
-	       aloop_state = ap->link ;
-	       ZFREE(ap) ;
-	    }
+	    CLEAR_ALOOP_STACK() ;
 
 	    return ;
 
@@ -1224,7 +1259,11 @@ execute(cdp, sp, fp)
 		  {
 		     if (*type_p == ST_LOCAL_ARRAY)
 		     {
-			if (sp >= local_p)  array_free(sp->ptr, LOCAL_DEL) ;
+			if (sp >= local_p)  
+			{
+			   array_clear(sp->ptr) ;
+			   ZFREE((ARRAY)sp->ptr) ;
+			}
 		     }
 		     else  cell_destroy(sp) ;
 

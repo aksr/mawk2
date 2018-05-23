@@ -13,6 +13,9 @@ the GNU General Public License, version 2, 1991.
 /* Microsoft C 6.0A under MSDOS */
 
 /*$Log: msc.h,v $
+ *Revision 1.6  1996/07/28 21:46:16  mike
+ *gnuish patch
+ *
  * Revision 1.5  1995/08/20  17:44:38  mike
  * minor fixes to msc and lower case makefile names
  *
@@ -54,6 +57,13 @@ the GNU General Public License, version 2, 1991.
 #define  SET_PROGNAME()  reargv(&argc,&argv) ; progname = argv[0]
 #else
 #define  SET_PROGNAME()  progname = "mawk"
+#ifdef OS2
+# ifdef MSDOS
+#  define DOS_STRING "dos+os2"
+# else
+#  define DOS_STRING "os2"
+# endif
+#endif
 #endif
 
 #endif  /* CONFIG_H  */

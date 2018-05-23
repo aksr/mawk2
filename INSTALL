@@ -21,7 +21,7 @@ run
 
 If you have problems, please report it.  If you can fix the problem, by
 changing config.user, please send the results.  Else send output from
-configure, make and config.h.  Send to brennan@boeing.com.
+configure, make and config.h.  Send to brennan@whidbey.com.
 
 
 
@@ -30,9 +30,13 @@ Look at the file msdos/INSTALL
 
 
 HPUX:
-Evidently there is more than one compiler and/or math library.
-Some configurations work out of the box (configure/make). Others
-need  CFLAGS='+O2 +FPVZOUI'.
+Evidently there is more than one compiler and/or math library.  Some
+configurations work out of the box (configure/make). Others need
+CFLAGS='+O2 +FPZO'.  On HPUX 9.05 with the ansi compiler HP92453-01
+A.09.77 set  CFLAGS='-Ae +O2 +FPZO'. Thanks to Dr. Rafael R.
+Pappalardo<rafapa@mozart.us.es> for this info.
+
+
 
 UNIXWARE:
 On some but not all versions, configure might decide you don't have

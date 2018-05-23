@@ -11,6 +11,13 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /*$Log: rexp0.c,v $
+ *Revision 1.5  1996/11/08 15:39:27  mike
+ *While cleaning up block_on, I introduced a bug. Now fixed.
+ *
+ *Revision 1.4  1996/09/02 18:47:09  mike
+ *Allow []...] and [^]...] to put ] in a class.
+ *Make ^* and ^+ syntax errors.
+ *
  * Revision 1.3  1994/12/26  16:37:52  mike
  * 1.1.2 fix to do_str was incomplete -- fix it
  *
@@ -106,11 +113,15 @@ RE_lex(mp)
 {
    register int c ;
 
+reswitch:
    switch (c = char2token(*lp))
    {
-      case T_OR:
       case T_PLUS:
       case T_STAR:
+	 if (prev == T_START) RE_error_trap(6) ;
+	 /* fall thru */
+
+      case T_OR:
       case T_Q:
       case T_RP:
 	 lp++ ;	 return	 prev = c ;
@@ -312,18 +323,19 @@ block_on(b, x, y)
 {
    int lo = x >> 3 ;
    int hi = y >> 3 ;
-   int i, j, bit ;
+   int r_lo = x&7 ;
+   int r_hi = y&7 ;
 
    if (lo == hi)
    {
-      j = x&7 ; bit =  1 << j ; i = (y&7) - j + 1 ;
-      for (; i; i--, bit <<= 1)	 b[lo] |= bit ;
+      b[lo] |= (1<<(r_hi+1)) - (1<<r_lo) ;
    }
    else
    {
-      for (i = lo + 1; i <= hi - 1; i++)  b[i] = 0xff ;
-      b[lo] |= (0xff << (x & 7)) ;
-      b[hi] |= ~(0xff << ((y & 7) + 1)) ;
+      int i ;
+      for (i = lo + 1; i <  hi ; i++)  b[i] = 0xff ;
+      b[lo] |= (0xff << r_lo) ;
+      b[hi] |= ~(0xff << (r_hi+1)) ;
    }
 }
 
@@ -345,7 +357,12 @@ do_class(start, mp)  char **start ;
    int comp_flag ;
 
    p = t = (*start) + 1 ;
-   if (*p == ']' || *p == '^' && *(p + 1) == ']')  RE_error_trap(-E3) ;
+
+   /* []...]  puts ] in a class
+      [^]..]  negates a class with ]
+   */
+   if (*p == ']') p++ ;
+   else if (*p == '^' && *(p + 1) == ']')  p += 2 ;
 
    while (1)			/* find the back of the class */
    {
@@ -446,7 +463,7 @@ do_class(start, mp)  char **start ;
    }
 
    /* make sure zero is off */
-   (*bvp)[0] &= 0xfe ;
+   (*bvp)[0] &= ~1 ;
 
    *mp = RE_class(store_bvp(bvp)) ;
    return T_CLASS ;
@@ -614,3 +631,4 @@ escape(start_p)
    *start_p = p ;
    return *(unsigned char *) (p - 1) ;
 }
+

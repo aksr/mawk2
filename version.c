@@ -11,6 +11,12 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /*$Log: version.c,v $
+ *Revision 1.10  1996/07/28 21:47:07  mike
+ *gnuish patch
+ *
+ * Revision 1.9  1996/02/01  04:44:15  mike
+ * roll a beta version
+ *
  * Revision 1.8  1995/08/20  17:40:45  mike
  * changed _stackavail to stackavail for MSC
  *
@@ -25,16 +31,19 @@ the GNU General Public License, version 2, 1991.
 static char mawkid[] = MAWK_ID ;
 
 #define	 VERSION_STRING	 \
-  "mawk 1.2%s%s %s, Copyright (C) Michael D. Brennan\n\n"
-
-#define	 DOS_STRING	""
+  "mawk 1.3%s%s %s, Copyright (C) Michael D. Brennan\n\n"
 
 /* If use different command line syntax for MSDOS
    mark that in VERSION	 */
 
+#ifndef DOS_STRING
 #if  MSDOS && ! HAVE_REARGV
-#undef	 DOS_STRING
 #define DOS_STRING  "MsDOS"
+#endif
+#endif
+
+#ifndef DOS_STRING
+#define DOS_STRING	""
 #endif
 
 static char fmt[] = "%-14s%10lu\n" ;
@@ -101,7 +110,7 @@ print_compiler_id()
 #endif
 
 #ifdef _MSC_VER
-   fprintf(stderr, "MS-DOS Microsoft C/C++ _MSC_VER %u\n", _MSC_VER) ;
+   fprintf(stderr, "Microsoft C/C++ _MSC_VER %u\n", _MSC_VER) ;
 #endif
 
 #ifdef __ZTC__

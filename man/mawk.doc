@@ -745,7 +745,8 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
      The function fflush(_e_x_p_r) flushes the output  file  or  pipe
      associated  with  _e_x_p_r.  Fflush returns 0 if _e_x_p_r is an open
      output stream else -1.  Fflush without an  argument  flushes
-     stdout.
+     stdout.  Fflush with an empty argument ("") flushes all open
+     output.
 
      The function system(_e_x_p_r) uses /bin/sh to execute  _e_x_p_r  and
      returns  the  exit status of the command _e_x_p_r.  Changes made
@@ -782,7 +783,6 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
 
   11. Splitting strings, records and files
      Awk programs use the same algorithm to  split  strings  into
-     arrays  with  split(),  and records into fields on FS.  mawk
 
 
 
@@ -797,6 +797,7 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
 
 
 
+     arrays  with  split(),  and records into fields on FS.  mawk
      uses essentially the same  algorithm  to  split  files  into
      records on RS.
 
@@ -848,7 +849,6 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
 
   12. Multi-line records
      Since mawk interprets RS as a regular expression, multi-line
-     records  are  easy.  Setting RS = "\n\n+", makes one or more
 
 
 
@@ -863,6 +863,7 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
 
 
 
+     records  are  easy.  Setting RS = "\n\n+", makes one or more
      blank lines separate records.  If FS = "  "  (the  default),
      then single newlines, by the rules for <SPACE> above, become
      space and single newlines are field separators.
@@ -914,7 +915,6 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
      _v_a_r  takes  place  and  i  skips  to the next argument; else
      ARGV[i] is opened for input.  If it fails to open, execution
      terminates with exit code 2.  If no command line argument is
-     a file argument, then input comes from stdin.  Getline in  a
 
 
 
@@ -929,6 +929,7 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
 
 
 
+     a file argument, then input comes from stdin.  Getline in  a
      BEGIN  action  opens  input.  "-" as a file argument denotes
      stdin.
 
@@ -980,7 +981,6 @@ EXAMPLES
 
           END{ print NR, words, chars }
 
-     3. count the number of unique "real words".
 
 
 
@@ -994,6 +994,8 @@ Version 1.2         Last change: Dec 22 1994                   15
 MAWK(1)                   USER COMMANDS                   MAWK(1)
 
 
+
+     3. count the number of unique "real words".
 
           BEGIN { FS = "[^A-Za-z]+" }
 
@@ -1045,8 +1047,6 @@ COMPATIBILITY ISSUES
           New variables: ENVIRON[] and CONVFMT.
 
           ANSI  C  conversion  specifications  for  printf()  and
-          sprintf().
-
 
 
 
@@ -1060,6 +1060,8 @@ Version 1.2         Last change: Dec 22 1994                   16
 MAWK(1)                   USER COMMANDS                   MAWK(1)
 
 
+
+          sprintf().
 
           New command options:  -v var=value, multiple -f options
           and implementation options as arguments to -W.
@@ -1111,8 +1113,6 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
      Buffering one record is needed to avoid terminating the last
      record with a space.
 
-     With mawk, the following are all equivalent,
-
 
 
 
@@ -1126,6 +1126,8 @@ Version 1.2         Last change: Dec 22 1994                   17
 MAWK(1)                   USER COMMANDS                   MAWK(1)
 
 
+
+     With mawk, the following are all equivalent,
 
           x ~ /a\+b/    x ~ "a\+b"     x ~ "a\\+b"
 
@@ -1176,9 +1178,7 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
           if  and  only  t  is  a  substring   of   s,   requires
           index("","") = 1.
 
-          If getline encounters end of file, getline var,  leaves
-          var unchanged.  Similarly, on entry to the END actions,
-          $0, the fields and NF have their value  unaltered  from
+
 
 
 
@@ -1193,6 +1193,9 @@ MAWK(1)                   USER COMMANDS                   MAWK(1)
 
 
 
+          If getline encounters end of file, getline var,  leaves
+          var unchanged.  Similarly, on entry to the END actions,
+          $0, the fields and NF have their value  unaltered  from
           the last record.
 
 SEE ALSO
@@ -1225,10 +1228,7 @@ BUGS
      lack of imagination when naming their programs.
 
 AUTHOR
-     Mike Brennan (brennan@boeing.com).
-
-
-
+     Mike Brennan (brennan@whidbey.com).
 
 
 

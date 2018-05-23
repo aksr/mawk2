@@ -12,6 +12,9 @@ the GNU General Public License, version 2, 1991.
 
 
 /*   $Log: mawk.h,v $
+ *   Revision 1.10  1996/08/25 19:31:04  mike
+ *   Added work-around for solaris strtod overflow bug.
+ *
  * Revision 1.9  1995/06/18  19:42:21  mike
  * Remove some redundant declarations and add some prototypes
  *
@@ -166,5 +169,9 @@ void PROTO( compile_error, ( char *, ...) ) ;
 void  PROTO( execute, (INST *, CELL *, CELL *) ) ;
 char *PROTO( find_kw_str, (int) ) ;
 
+#ifdef HAVE_STRTOD_OVF_BUG
+double PROTO(strtod_with_ovf_bug, (const char*, char**)) ;
+#define strtod  strtod_with_ovf_bug
+#endif
 
 #endif  /* MAWK_H */

@@ -1479,7 +1479,7 @@ if test -s conftest && (./conftest; exit) 2>/dev/null; then
   maxint_set=1
 else
   { echo "configure: error: C program to compute maxint and maxlong failed.
-Please send bug report to brennan@boeing.com." 1>&2; exit 1; }
+Please send bug report to brennan@whidbey.com." 1>&2; exit 1; }
 fi
 fi
 rm -fr conftest*
@@ -1514,7 +1514,7 @@ if test -s conftest && (./conftest; exit) 2>/dev/null; then
   :
 else
   { echo "configure: error: C program to compute maxint and maxlong failed.
-Please send bug report to brennan@boeing.com." 1>&2; exit 1; }
+Please send bug report to brennan@whidbey.com." 1>&2; exit 1; }
 fi
 fi
 rm -fr conftest*
@@ -1705,7 +1705,7 @@ else
   echo "$ac_t""no" 1>&6
 fi
 
-   if test "$sigvec" = 1 && ./fpe_check x >> defines.out ; then :
+   if test "$sigvec" = 1 && ./fpe_check phoney_arg >> defines.out ; then :
    else cat >> confdefs.h <<\EOF
 #define NOINFO_SIGFPE 1
 EOF
@@ -1925,7 +1925,7 @@ else
   echo "$ac_t""no" 1>&6
 fi
 
-   if test "$sigvec" = 1 && ./fpe_check x >> defines.out ; then :
+   if test "$sigvec" = 1 && ./fpe_check phoney_arg >> defines.out ; then :
    else cat >> confdefs.h <<\EOF
 #define NOINFO_SIGFPE 1
 EOF
@@ -1933,6 +1933,18 @@ EOF
 echo  X 'NOINFO_SIGFPE' '1' >> defines.out
    fi
 fi 
+# look for strtod overflow bug
+echo $ac_n "checking strtod bug on overflow""... $ac_c" 1>&6
+rm -f fpe_check
+$CC $CFLAGS -DRETSIGTYPE=$ac_cv_type_signal -DUSE_IEEEFP_H \
+	    -o fpe_check fpe_check.c $MATHLIB
+if ./fpe_check phoney_arg phoney_arg 2>/dev/null
+then 
+   echo "$ac_t""no bug" 1>&6
+else
+   echo "$ac_t""buggy -- will use work around" 1>&6
+   echo  X 'HAVE_STRTOD_OVF_BUG' '1' >> defines.out
+fi
 
 else
    if test $status != 4 ; then
@@ -1946,7 +1958,7 @@ if eval "test \"`echo '$''{'ac_cv_func_sigaction'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 1950 "configure"
+#line 1962 "configure"
 #include "confdefs.h"
 /* System header to define __stub macros and hopefully few prototypes,
     which can conflict with char sigaction(); below.  */
@@ -1991,7 +2003,7 @@ if eval "test \"`echo '$''{'ac_cv_header_$ac_safe'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 1995 "configure"
+#line 2007 "configure"
 #include "confdefs.h"
 #include <siginfo.h>
 EOF
@@ -2026,7 +2038,7 @@ if eval "test \"`echo '$''{'ac_cv_func_sigvec'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 2030 "configure"
+#line 2042 "configure"
 #include "confdefs.h"
 /* System header to define __stub macros and hopefully few prototypes,
     which can conflict with char sigvec(); below.  */
@@ -2065,7 +2077,7 @@ else
   echo "$ac_t""no" 1>&6
 fi
 
-   if test "$sigvec" = 1 && ./fpe_check x >> defines.out ; then :
+   if test "$sigvec" = 1 && ./fpe_check phoney_arg >> defines.out ; then :
    else cat >> confdefs.h <<\EOF
 #define NOINFO_SIGFPE 1
 EOF
@@ -2097,17 +2109,20 @@ cat 1>&2 <<'EOF'
 Warning: Your system defaults do not generate floating point
 exceptions, but your math library does not support this behavior.
 You need to
-#define TURN_ON_FPE_TRAPS() 
+#define TURN_ON_FPE_TRAPS() to use fp exceptions for consistency.
 Please report this so I can fix this script to do it automatically.
 EOF
 ;;
     esac
+echo brennan@whidbey.com
+echo You can continue with the build and the resulting mawk will be
+echo useable, but getting FPE_TRAPS_ON correct eventually is best.
 fi  ;;
 
   *)  # some sort of disaster
 cat 1>&2 <<'EOF'
 The program `fpe_check' compiled from fpe_check.c seems to have
-unexpectly blown up.  Please report this.
+unexpectly blown up.  Please report this to brennan@whidbey.com.
 EOF
 # quit or not ???
 ;;

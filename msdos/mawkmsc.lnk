@@ -1,9 +1,0 @@
-parse.obl+scan.obl+memory.obl+main.obl+hash.obl+execute.obl+code.obl+
-da.obl+error.obl+init.obl+bi_vars.obl+cast.obl+print.obl+bi_funct.obl+
-kw.obl+jmp.obl+array.obl+field.obl++split.obl+re_cmpl.obl+zmalloc.obl+
-fin.obl+files.obl++scancode.obl+matherr.obl+fcall.obl+version.obl+
-dosexec.obl+
-rexp.obl+rexp0.obl+rexp1.obl+rexp2.obl+rexp3.obl+rexpdb.obl
-mawk/noe/noi/stack:16384
-
-;

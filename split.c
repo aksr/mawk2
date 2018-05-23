@@ -11,6 +11,9 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /* $Log: split.c,v $
+ * Revision 1.3  1996/02/01  04:39:42  mike
+ * dynamic array scheme
+ *
  * Revision 1.2  1993/07/15  01:55:03  mike
  * rm SIZE_T & indent
  *
@@ -326,7 +329,7 @@ bi_split(sp)
    sp->type = C_DOUBLE ;
    sp->dval = (double) cnt ;
 
-   load_array((ARRAY) (sp + 1)->ptr, cnt) ;
+   array_load((ARRAY) (sp + 1)->ptr, cnt) ;
 
    return sp ;
 }
